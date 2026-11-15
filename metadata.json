@@ -1,0 +1,6 @@
+{
+  "name": "Aqsa Business Management System",
+  "description": "Complete Gemstone & Jewelry Merchant ERP, POS, 22-Column Inventory, Multi-Currency (RMB/USD/PKR) Invoicing, QR Scanner, Accounts & Reporting for N.A GEM'S — Nazim Ahmer Nagina.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

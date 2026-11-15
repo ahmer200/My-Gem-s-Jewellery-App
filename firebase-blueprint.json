@@ -1,0 +1,244 @@
+{
+  "entities": {
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Root business workspace for Aqsa Business Management System.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "companyName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "companyName", "createdAt", "updatedAt"]
+    },
+    "BusinessProfile": {
+      "title": "BusinessProfile",
+      "description": "Company profile, currency exchange rates, and default markup settings.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "companyName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "subtitle": { "type": "string", "maxLength": 200 },
+        "address": { "type": "string", "maxLength": 400 },
+        "contact": { "type": "string", "maxLength": 80 },
+        "whatsapp": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 160 },
+        "ntn": { "type": "string", "maxLength": 64 },
+        "rmbToPkr": { "type": "number" },
+        "usdToPkr": { "type": "number" },
+        "defaultMarkupPercent": { "type": "number" },
+        "invoiceFooter": { "type": "string", "maxLength": 500 },
+        "logoDataUrl": { "type": "string", "maxLength": 350000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "companyName", "rmbToPkr", "usdToPkr", "defaultMarkupPercent", "createdAt", "updatedAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "22-column gemstone and jewelry inventory item.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "sku": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "maxLength": 80 },
+        "gemstoneType": { "type": "string", "maxLength": 80 },
+        "origin": { "type": "string", "maxLength": 100 },
+        "shapeCut": { "type": "string", "maxLength": 80 },
+        "colour": { "type": "string", "maxLength": 80 },
+        "clarity": { "type": "string", "maxLength": 80 },
+        "weightCarats": { "type": "number" },
+        "sizeMm": { "type": "string", "maxLength": 60 },
+        "treatment": { "type": "string", "maxLength": 100 },
+        "certLab": { "type": "string", "maxLength": 60 },
+        "certNumber": { "type": "string", "maxLength": 80 },
+        "stockQty": { "type": "number" },
+        "minStockAlert": { "type": "number" },
+        "vaultLocation": { "type": "string", "maxLength": 80 },
+        "supplierName": { "type": "string", "maxLength": 140 },
+        "costCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "unitCost": { "type": "number" },
+        "sellCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "baseSellPrice": { "type": "number" },
+        "imageUrl": { "type": "string", "maxLength": 250000 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "sku", "name", "stockQty", "costCurrency", "unitCost", "sellCurrency", "baseSellPrice", "createdAt", "updatedAt"]
+    },
+    "PurchaseRecord": {
+      "title": "PurchaseRecord",
+      "description": "Supplier purchase transaction with import cost and currency conversion.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "referenceNo": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "supplierName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "supplierContact": { "type": "string", "maxLength": 80 },
+        "purchaseDate": { "type": "string", "maxLength": 40 },
+        "currency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "exchangeRateApplied": { "type": "number" },
+        "itemCostOrig": { "type": "number" },
+        "importCostOrig": { "type": "number" },
+        "totalOrig": { "type": "number" },
+        "totalPkr": { "type": "number" },
+        "paidPkr": { "type": "number" },
+        "status": { "type": "string", "enum": ["Paid", "Partial", "Payable"] },
+        "itemsSummary": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "referenceNo", "supplierName", "purchaseDate", "currency", "totalPkr", "status", "createdAt", "updatedAt"]
+    },
+    "SalesOrder": {
+      "title": "SalesOrder",
+      "description": "Customer sales order and multi-currency invoice record.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "invoiceNo": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "customerAddress": { "type": "string", "maxLength": 300 },
+        "orderDate": { "type": "string", "maxLength": 40 },
+        "sourceCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "rmbRateUsed": { "type": "number" },
+        "usdRateUsed": { "type": "number" },
+        "markupPercentUsed": { "type": "number" },
+        "finalCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "baseSubtotal": { "type": "number" },
+        "convertedAmountPkr": { "type": "number" },
+        "finalTotal": { "type": "number" },
+        "finalTotalPkrEquivalent": { "type": "number" },
+        "totalCostPkr": { "type": "number" },
+        "profitPkr": { "type": "number" },
+        "paidAmountPkr": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Partial", "Pending"] },
+        "itemsPayload": { "type": "string", "maxLength": 12000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "invoiceNo", "customerName", "orderDate", "sourceCurrency", "finalCurrency", "finalTotal", "paymentStatus", "createdAt", "updatedAt"]
+    },
+    "ReturnRecord": {
+      "title": "ReturnRecord",
+      "description": "Sales return with stock adjustment and currency refund conversion.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "returnNo": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "invoiceNo": { "type": "string", "maxLength": 64 },
+        "customerName": { "type": "string", "maxLength": 140 },
+        "sku": { "type": "string", "maxLength": 64 },
+        "productName": { "type": "string", "maxLength": 200 },
+        "quantity": { "type": "number" },
+        "reason": { "type": "string", "maxLength": 300 },
+        "restocked": { "type": "boolean" },
+        "refundCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "exchangeRateApplied": { "type": "number" },
+        "refundAmountOrig": { "type": "number" },
+        "refundAmountPkr": { "type": "number" },
+        "returnDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "returnNo", "productName", "quantity", "refundCurrency", "refundAmountPkr", "returnDate", "createdAt", "updatedAt"]
+    },
+    "PaymentRecord": {
+      "title": "PaymentRecord",
+      "description": "Incoming and outgoing cash flow payment record in RMB, USD, or PKR.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "type": { "type": "string", "enum": ["Incoming", "Outgoing"] },
+        "category": { "type": "string", "maxLength": 80 },
+        "partyName": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "referenceNo": { "type": "string", "maxLength": 80 },
+        "currency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "exchangeRateApplied": { "type": "number" },
+        "amountOrig": { "type": "number" },
+        "amountPkr": { "type": "number" },
+        "method": { "type": "string", "maxLength": 60 },
+        "paymentDate": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "type", "partyName", "currency", "amountOrig", "amountPkr", "paymentDate", "createdAt", "updatedAt"]
+    },
+    "ReminderLog": {
+      "title": "ReminderLog",
+      "description": "SMS and WhatsApp payment reminder log.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "customerName": { "type": "string", "maxLength": 140 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "invoiceNo": { "type": "string", "maxLength": 64 },
+        "channel": { "type": "string", "enum": ["WhatsApp", "SMS"] },
+        "message": { "type": "string", "maxLength": 1000 },
+        "sentDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "customerName", "channel", "sentDate", "createdAt", "updatedAt"]
+    },
+    "StaffAccount": {
+      "title": "StaffAccount",
+      "description": "Multi-user staff account and RBAC permissions.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "email": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["admin", "staff"] },
+        "active": { "type": "boolean" },
+        "permissionsList": { "type": "string", "maxLength": 600 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "role", "active", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/workspaces/{workspaceId}": {
+      "schema": { "$ref": "#/entities/Workspace" },
+      "description": "Business workspace root document."
+    },
+    "/workspaces/{workspaceId}/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/BusinessProfile" },
+      "description": "Company profile, currency rates, and markup configuration."
+    },
+    "/workspaces/{workspaceId}/inventory/{itemId}": {
+      "schema": { "$ref": "#/entities/InventoryItem" },
+      "description": "Gemstone and jewelry inventory catalog."
+    },
+    "/workspaces/{workspaceId}/purchases/{purchaseId}": {
+      "schema": { "$ref": "#/entities/PurchaseRecord" },
+      "description": "Supplier purchase history."
+    },
+    "/workspaces/{workspaceId}/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/SalesOrder" },
+      "description": "Customer sales orders and invoices."
+    },
+    "/workspaces/{workspaceId}/returns/{returnId}": {
+      "schema": { "$ref": "#/entities/ReturnRecord" },
+      "description": "Product returns and currency refunds."
+    },
+    "/workspaces/{workspaceId}/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/PaymentRecord" },
+      "description": "Incoming and outgoing payment records."
+    },
+    "/workspaces/{workspaceId}/reminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/ReminderLog" },
+      "description": "WhatsApp and SMS payment reminder logs."
+    },
+    "/workspaces/{workspaceId}/staff/{staffId}": {
+      "schema": { "$ref": "#/entities/StaffAccount" },
+      "description": "Multi-user staff accounts and role permissions."
+    }
+  }
+}
