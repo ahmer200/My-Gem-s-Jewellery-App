@@ -7,7 +7,6 @@ import {
   Plus,
   QrCode,
   Search,
-  Trash2,
   X,
 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
@@ -23,6 +22,7 @@ import {
   exportInventoryPdf,
 } from '../utils/exporters';
 import { QrTagModal } from '../components/QrTagModal';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 const EMPTY_FORM: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'> = {
   sku: '',
@@ -438,13 +438,10 @@ export const InventoryView: React.FC = () => {
                               >
                                 <Edit3 className="w-4 h-4" />
                               </button>
-                              <button
-                                onClick={() => deleteInventoryItem(item.id)}
-                                title="Delete Item"
-                                className="p-1.5 rounded-md text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <DeleteActionButton
+                                onConfirm={() => deleteInventoryItem(item.id)}
+                                title={`Delete ${item.sku}`}
+                              />
                             </>
                           )}
                         </div>

@@ -90,10 +90,13 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "7ddd1c7df94a6dd53586b9f989fa9978"
   }, {
     "url": "index.html",
-    "revision": "e2f6250c52f22af88e877d55446b610e"
+    "revision": "22a6397eedbbe1054d663ffe99174df0"
   }, {
     "url": "icon.svg",
     "revision": "99943b3ead5aa20d117f211b6344dbbe"
+  }, {
+    "url": "favicon.ico",
+    "revision": "0d736d574ec12bd0e64e767c7030c5f3"
   }, {
     "url": "apple-touch-icon.png",
     "revision": "105c1f78193939d6ad2453a84c5c2ade"
@@ -101,16 +104,16 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "assets/purify.es-Dzkdzyfv.js",
     "revision": null
   }, {
-    "url": "assets/index.es-s-2DWk6Z.js",
+    "url": "assets/index.es-5fGpKSpF.js",
     "revision": null
   }, {
-    "url": "assets/index-DdEzTwHb.css",
+    "url": "assets/index-ftUr-lNx.css",
     "revision": null
   }, {
-    "url": "assets/index-BMLIkIcb.js",
+    "url": "assets/index-B_5GfrN4.js",
     "revision": null
   }, {
-    "url": "assets/html2canvas-B_Ax73DG.js",
+    "url": "assets/html2canvas-BT7nffg4.js",
     "revision": null
   }, {
     "url": "assets/aistudio/1792354305419_957ebff5.png",

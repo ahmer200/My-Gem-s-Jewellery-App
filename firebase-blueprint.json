@@ -141,6 +141,7 @@
         "exchangeRateApplied": { "type": "number" },
         "refundAmountOrig": { "type": "number" },
         "refundAmountPkr": { "type": "number" },
+        "itemsPayload": { "type": "string", "maxLength": 12000 },
         "returnDate": { "type": "string", "maxLength": 40 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }

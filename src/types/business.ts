@@ -96,6 +96,7 @@ export interface SalesLineItem {
   quantity: number;
   unitPriceOrig: number;
   unitCostPkr: number;
+  markupPercent?: number;
 }
 
 export interface SalesOrder {
@@ -126,6 +127,15 @@ export interface SalesOrder {
   createdAt: string;
 }
 
+export interface ReturnLineItem {
+  inventoryId?: string;
+  sku: string;
+  productName: string;
+  quantity: number;
+  unitPriceOrig: number;
+  percentAdjustment: number;
+}
+
 export interface ReturnRecord {
   id: string;
   returnNo: string;
@@ -141,6 +151,7 @@ export interface ReturnRecord {
   exchangeRateApplied: number;
   refundAmountOrig: number;
   refundAmountPkr: number;
+  items?: ReturnLineItem[];
   returnDate: string;
   createdAt: string;
 }

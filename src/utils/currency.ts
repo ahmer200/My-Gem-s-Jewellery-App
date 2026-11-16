@@ -1,11 +1,18 @@
 import { CompanyProfile, CurrencyCode } from '../types/business';
 
+export interface LineItemCalcInput {
+  quantity: number;
+  unitPriceOrig: number;
+  markupPercent?: number;
+}
+
 export interface InvoiceCalculationInput {
   baseSubtotal: number;
   sourceCurrency: CurrencyCode;
   rmbRateUsed: number;
   usdRateUsed: number;
   markupPercentUsed: number;
+  items?: LineItemCalcInput[];
 }
 
 export interface InvoiceCalculationResult {
@@ -76,25 +83,64 @@ export function getRateForCurrency(
   return 1;
 }
 
+export function getLineItemAmounts(
+  item: LineItemCalcInput,
+  fallbackPercent: number
+): {
+  lineBaseOrig: number;
+  percentUsed: number;
+  lineMarkupOrig: number;
+  lineTotalOrig: number;
+} {
+  const qty = Math.max(0, Number(item.quantity) || 0);
+  const unit = Math.max(0, Number(item.unitPriceOrig) || 0);
+  const percentUsed = Number.isFinite(item.markupPercent)
+    ? Number(item.markupPercent)
+    : fallbackPercent;
+  const lineBaseOrig = qty * unit;
+  const lineMarkupOrig = lineBaseOrig * (percentUsed / 100);
+  const lineTotalOrig = lineBaseOrig + lineMarkupOrig;
+  return { lineBaseOrig, percentUsed, lineMarkupOrig, lineTotalOrig };
+}
+
 /**
- * Exact Invoice Currency & Percentage Calculation System:
- * - If product price is entered in RMB and RMB rate > 0: auto convert RMB -> PKR using RMB rate, apply markup %, show final PKR price.
- * - If product price is entered in USD and USD rate > 0 (and RMB rate is not 0): auto convert USD -> PKR using USD rate, apply markup %, show final PKR price.
- * - If RMB value = 0 in invoice (or the active foreign rate = 0): invoice total is calculated and shown in original currency (RMB or USD),
+ * Exact Invoice Currency & Per-Item Percentage Calculation System:
+ * - Each line item can carry its own percentage markup (or fallback to invoice default %).
+ * - If product price is entered in RMB and RMB rate > 0: auto convert RMB -> PKR using RMB rate, apply per-item markup %, show final PKR price.
+ * - If product price is entered in USD and USD rate > 0 (and RMB rate is not 0): auto convert USD -> PKR using USD rate, apply per-item markup %, show final PKR price.
+ * - If RMB value = 0 in invoice (or active foreign rate = 0): invoice total is calculated and shown in original currency (RMB or USD),
  *   and final amount clearly mentions currency symbol (RMB / USD / PKR) at the end of bill.
- * - If product price is entered in PKR: apply markup % directly in PKR.
+ * - If product price is entered in PKR: apply per-item markup % directly in PKR.
  */
 export function calculateInvoiceTotals(
   input: InvoiceCalculationInput,
   fallbackProfile?: Pick<CompanyProfile, 'rmbToPkr' | 'usdToPkr'>
 ): InvoiceCalculationResult {
-  const baseSubtotal = Math.max(0, Number(input.baseSubtotal) || 0);
   const rmbRate = Math.max(0, Number(input.rmbRateUsed) || 0);
   const usdRate = Math.max(0, Number(input.usdRateUsed) || 0);
-  const markupPercent = Math.max(0, Number(input.markupPercentUsed) || 0);
+  const defaultMarkup = Math.max(0, Number(input.markupPercentUsed) || 0);
+
+  let baseSubtotal = Math.max(0, Number(input.baseSubtotal) || 0);
+  let totalMarkupOrig = baseSubtotal * (defaultMarkup / 100);
+  let effectiveMarkupPercent = defaultMarkup;
+
+  if (input.items && input.items.length > 0) {
+    baseSubtotal = input.items.reduce(
+      (sum, li) => sum + Math.max(0, Number(li.unitPriceOrig) || 0) * Math.max(0, Number(li.quantity) || 0),
+      0
+    );
+    totalMarkupOrig = input.items.reduce((sum, li) => {
+      const { lineMarkupOrig } = getLineItemAmounts(li, defaultMarkup);
+      return sum + lineMarkupOrig;
+    }, 0);
+    effectiveMarkupPercent =
+      baseSubtotal > 0
+        ? Number(((totalMarkupOrig / baseSubtotal) * 100).toFixed(2))
+        : defaultMarkup;
+  }
 
   if (input.sourceCurrency === 'PKR') {
-    const markupAmount = baseSubtotal * (markupPercent / 100);
+    const markupAmount = totalMarkupOrig;
     const finalTotal = baseSubtotal + markupAmount;
     return {
       sourceCurrency: 'PKR',
@@ -103,17 +149,17 @@ export function calculateInvoiceTotals(
       isOriginalCurrencyMode: false,
       baseSubtotal,
       convertedAmountPkr: baseSubtotal,
-      markupPercentUsed: markupPercent,
+      markupPercentUsed: effectiveMarkupPercent,
       markupAmount,
       finalTotal,
       finalTotalPkrEquivalent: finalTotal,
-      calculationExplanation: `Entered in PKR (Rate: 1.00) + ${markupPercent}% markup = ${formatMoney(finalTotal, 'PKR')}`,
+      calculationExplanation: `Entered in PKR (Rate: 1.00) + ${effectiveMarkupPercent}% avg item markup = ${formatMoney(finalTotal, 'PKR')}`,
     };
   }
 
   // Rule: If RMB value = 0 in invoice, show invoice total in original currency (RMB or USD)
   if (rmbRate === 0 || (input.sourceCurrency === 'USD' && usdRate === 0)) {
-    const markupAmount = baseSubtotal * (markupPercent / 100);
+    const markupAmount = totalMarkupOrig;
     const finalTotal = baseSubtotal + markupAmount;
     const referenceRate =
       input.sourceCurrency === 'RMB'
@@ -128,18 +174,18 @@ export function calculateInvoiceTotals(
       isOriginalCurrencyMode: true,
       baseSubtotal,
       convertedAmountPkr: 0,
-      markupPercentUsed: markupPercent,
+      markupPercentUsed: effectiveMarkupPercent,
       markupAmount,
       finalTotal,
       finalTotalPkrEquivalent: pkrEquivalent,
-      calculationExplanation: `RMB Rate = 0 (Original Currency Mode): ${formatMoney(baseSubtotal, input.sourceCurrency)} + ${markupPercent}% markup = ${formatMoney(finalTotal, input.sourceCurrency)}`,
+      calculationExplanation: `RMB Rate = 0 (Original Currency Mode): ${formatMoney(baseSubtotal, input.sourceCurrency)} + ${effectiveMarkupPercent}% item markup = ${formatMoney(finalTotal, input.sourceCurrency)}`,
     };
   }
 
-  // Standard Foreign Currency -> PKR conversion + percentage markup
+  // Standard Foreign Currency -> PKR conversion + per-item percentage markup
   const activeRate = input.sourceCurrency === 'RMB' ? rmbRate : usdRate;
   const convertedAmountPkr = baseSubtotal * activeRate;
-  const markupAmount = convertedAmountPkr * (markupPercent / 100);
+  const markupAmount = totalMarkupOrig * activeRate;
   const finalTotal = convertedAmountPkr + markupAmount;
 
   return {
@@ -149,11 +195,11 @@ export function calculateInvoiceTotals(
     isOriginalCurrencyMode: false,
     baseSubtotal,
     convertedAmountPkr,
-    markupPercentUsed: markupPercent,
+    markupPercentUsed: effectiveMarkupPercent,
     markupAmount,
     finalTotal,
     finalTotalPkrEquivalent: finalTotal,
-    calculationExplanation: `${formatMoney(baseSubtotal, input.sourceCurrency)} × ${activeRate.toFixed(2)} = ${formatMoney(convertedAmountPkr, 'PKR')} + ${markupPercent}% markup = ${formatMoney(finalTotal, 'PKR')}`,
+    calculationExplanation: `${formatMoney(baseSubtotal, input.sourceCurrency)} × ${activeRate.toFixed(2)} = ${formatMoney(convertedAmountPkr, 'PKR')} + ${effectiveMarkupPercent}% item markup = ${formatMoney(finalTotal, 'PKR')}`,
   };
 }
 

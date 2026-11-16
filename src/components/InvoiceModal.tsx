@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { Eye, FileDown, MessageCircle, Printer, X } from 'lucide-react';
 import { SalesOrder } from '../types/business';
 import { useBusiness } from '../context/BusinessContext';
-import { formatMoney } from '../utils/currency';
+import { formatMoney, getLineItemAmounts } from '../utils/currency';
 import { exportInvoicePdf, getInvoicePdfPreviewUrl } from '../utils/exporters';
 
 interface InvoiceModalProps {
@@ -288,33 +288,48 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
                   <th className="py-2.5 pr-3 font-semibold text-right">
                     Unit ({order.sourceCurrency})
                   </th>
+                  <th className="py-2.5 pr-3 font-semibold text-right">Item %</th>
                   <th className="py-2.5 font-semibold text-right">
-                    Subtotal ({order.sourceCurrency})
+                    Total w/ % ({order.sourceCurrency})
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {order.items.map((item, idx) => (
-                  <tr key={`${item.inventoryId}-${idx}`}>
-                    <td className="py-2.5 pr-3 font-mono text-slate-700 whitespace-nowrap">
-                      {item.sku}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <p className="font-semibold text-slate-900">{item.productName}</p>
-                      <p className="text-[11px] text-slate-500">{item.gemstoneDetails}</p>
-                    </td>
-                    <td className="py-2.5 pr-3 font-mono text-slate-600 whitespace-nowrap">
-                      {item.certNumber || '—'}
-                    </td>
-                    <td className="py-2.5 pr-3 text-right font-mono">{item.quantity}</td>
-                    <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
-                      {formatMoney(item.unitPriceOrig, order.sourceCurrency)}
-                    </td>
-                    <td className="py-2.5 text-right font-mono font-semibold whitespace-nowrap">
-                      {formatMoney(item.unitPriceOrig * item.quantity, order.sourceCurrency)}
-                    </td>
-                  </tr>
-                ))}
+                {order.items.map((item, idx) => {
+                  const { percentUsed, lineBaseOrig, lineTotalOrig } = getLineItemAmounts(
+                    item,
+                    order.markupPercentUsed
+                  );
+                  return (
+                    <tr key={`${item.inventoryId}-${idx}`}>
+                      <td className="py-2.5 pr-3 font-mono text-slate-700 whitespace-nowrap">
+                        {item.sku}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <p className="font-semibold text-slate-900">{item.productName}</p>
+                        <p className="text-[11px] text-slate-500">{item.gemstoneDetails}</p>
+                      </td>
+                      <td className="py-2.5 pr-3 font-mono text-slate-600 whitespace-nowrap">
+                        {item.certNumber || '—'}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right font-mono">{item.quantity}</td>
+                      <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
+                        {formatMoney(item.unitPriceOrig, order.sourceCurrency)}
+                      </td>
+                      <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap text-emerald-800 font-semibold">
+                        +{percentUsed}%
+                      </td>
+                      <td className="py-2.5 text-right font-mono whitespace-nowrap">
+                        <p className="font-semibold text-slate-900">
+                          {formatMoney(lineTotalOrig, order.sourceCurrency)}
+                        </p>
+                        <p className="text-[10px] text-slate-500">
+                          Base: {formatMoney(lineBaseOrig, order.sourceCurrency)}
+                        </p>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Trash2, UserCheck, UserPlus } from 'lucide-react';
+import { ShieldCheck, UserCheck, UserPlus } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { ALL_PERMISSIONS } from '../utils/seedData';
 import { PermissionKey, UserRole } from '../types/business';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 export const UsersView: React.FC = () => {
   const {
@@ -220,13 +221,10 @@ export const UsersView: React.FC = () => {
                       >
                         {user.active ? 'Suspend' : 'Activate'}
                       </button>
-                      <button
-                        onClick={() => deleteStaffAccount(user.id)}
-                        className="p-2 rounded-lg text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30"
-                        title="Delete user"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <DeleteActionButton
+                        onConfirm={() => deleteStaffAccount(user.id)}
+                        title={`Delete user ${user.name}`}
+                      />
                     </>
                   )}
                 </div>

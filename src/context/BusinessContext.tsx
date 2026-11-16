@@ -26,6 +26,7 @@ import {
 } from '../utils/seedData';
 import {
   auth,
+  deleteCloudDocument,
   pullWorkspaceFromCloud,
   pushWorkspaceToCloud,
   signInWithGoogle,
@@ -114,11 +115,16 @@ interface BusinessContextValue extends StoredBusinessState {
   deleteInventoryItem: (id: string) => void;
   addPurchase: (purchase: Omit<PurchaseRecord, 'id' | 'createdAt'>) => PurchaseRecord;
   payPurchaseBalance: (purchaseId: string, amountPkr: number) => void;
+  deletePurchase: (id: string) => void;
   addSale: (sale: Omit<SalesOrder, 'id' | 'createdAt'>) => SalesOrder;
   recordSalePayment: (saleId: string, amountPkr: number, method: PaymentRecord['method']) => void;
+  deleteSale: (id: string) => void;
   addReturn: (ret: Omit<ReturnRecord, 'id' | 'createdAt'>) => ReturnRecord;
+  deleteReturn: (id: string) => void;
   addPayment: (payment: Omit<PaymentRecord, 'id' | 'createdAt'>) => PaymentRecord;
+  deletePayment: (id: string) => void;
   addReminderLog: (log: Omit<ReminderLog, 'id'>) => void;
+  deleteReminderLog: (id: string) => void;
   updateReminderSettings: (settings: Partial<ReminderSettings>) => void;
   addStaffAccount: (account: Omit<StaffAccount, 'id' | 'createdAt'>) => void;
   updateStaffAccount: (id: string, patch: Partial<StaffAccount>) => void;
@@ -268,9 +274,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         inventory: prev.inventory.filter((item) => item.id !== id),
       }));
-      notify('Inventory item removed.', 'info');
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'inventory', id).catch(() => {});
+      }
+      notify('Inventory item deleted.', 'info');
     },
-    [notify]
+    [firebaseUser, notify]
   );
 
   const addPurchase = useCallback(
@@ -372,6 +381,40 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       notify('Supplier payment recorded.');
     },
     [notify]
+  );
+
+  const deletePurchase = useCallback(
+    (id: string) => {
+      setState((prev) => {
+        const target = prev.purchases.find((p) => p.id === id);
+        if (!target) return prev;
+        const nextInventory = prev.inventory.map((inv) => {
+          const addedQty = target.items
+            .filter(
+              (li) =>
+                li.inventoryId === inv.id ||
+                li.sku.toLowerCase() === inv.sku.toLowerCase()
+            )
+            .reduce((sum, li) => sum + li.quantity, 0);
+          if (addedQty <= 0) return inv;
+          return {
+            ...inv,
+            stockQty: Math.max(0, inv.stockQty - addedQty),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        return {
+          ...prev,
+          purchases: prev.purchases.filter((p) => p.id !== id),
+          inventory: nextInventory,
+        };
+      });
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'purchases', id).catch(() => {});
+      }
+      notify('Purchase record deleted & linked stock adjusted.', 'info');
+    },
+    [firebaseUser, notify]
   );
 
   const addSale = useCallback(
@@ -477,6 +520,40 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [notify]
   );
 
+  const deleteSale = useCallback(
+    (id: string) => {
+      setState((prev) => {
+        const target = prev.sales.find((s) => s.id === id);
+        if (!target) return prev;
+        const nextInventory = prev.inventory.map((inv) => {
+          const soldQty = target.items
+            .filter(
+              (li) =>
+                li.inventoryId === inv.id ||
+                li.sku.toLowerCase() === inv.sku.toLowerCase()
+            )
+            .reduce((sum, li) => sum + li.quantity, 0);
+          if (soldQty <= 0) return inv;
+          return {
+            ...inv,
+            stockQty: inv.stockQty + soldQty,
+            updatedAt: new Date().toISOString(),
+          };
+        });
+        return {
+          ...prev,
+          sales: prev.sales.filter((s) => s.id !== id),
+          inventory: nextInventory,
+        };
+      });
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'sales', id).catch(() => {});
+      }
+      notify('Sales invoice deleted & sold stock restored.', 'info');
+    },
+    [firebaseUser, notify]
+  );
+
   const addReturn = useCallback(
     (ret: Omit<ReturnRecord, 'id' | 'createdAt'>): ReturnRecord => {
       const created: ReturnRecord = {
@@ -487,17 +564,27 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setState((prev) => {
         const nextInventory = created.restocked
           ? prev.inventory.map((inv) => {
-              if (
+              let addQty = 0;
+              if (created.items && created.items.length > 0) {
+                addQty = created.items
+                  .filter(
+                    (ri) =>
+                      ri.inventoryId === inv.id ||
+                      ri.sku.toLowerCase() === inv.sku.toLowerCase()
+                  )
+                  .reduce((sum, ri) => sum + ri.quantity, 0);
+              } else if (
                 inv.id === created.inventoryId ||
                 inv.sku.toLowerCase() === created.sku.toLowerCase()
               ) {
-                return {
-                  ...inv,
-                  stockQty: inv.stockQty + created.quantity,
-                  updatedAt: new Date().toISOString(),
-                };
+                addQty = created.quantity;
               }
-              return inv;
+              if (addQty <= 0) return inv;
+              return {
+                ...inv,
+                stockQty: inv.stockQty + addQty,
+                updatedAt: new Date().toISOString(),
+              };
             })
           : prev.inventory;
 
@@ -530,6 +617,50 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [notify]
   );
 
+  const deleteReturn = useCallback(
+    (id: string) => {
+      setState((prev) => {
+        const target = prev.returns.find((r) => r.id === id);
+        if (!target) return prev;
+        const nextInventory = target.restocked
+          ? prev.inventory.map((inv) => {
+              let removeQty = 0;
+              if (target.items && target.items.length > 0) {
+                removeQty = target.items
+                  .filter(
+                    (ri) =>
+                      ri.inventoryId === inv.id ||
+                      ri.sku.toLowerCase() === inv.sku.toLowerCase()
+                  )
+                  .reduce((sum, ri) => sum + ri.quantity, 0);
+              } else if (
+                inv.id === target.inventoryId ||
+                inv.sku.toLowerCase() === target.sku.toLowerCase()
+              ) {
+                removeQty = target.quantity;
+              }
+              if (removeQty <= 0) return inv;
+              return {
+                ...inv,
+                stockQty: Math.max(0, inv.stockQty - removeQty),
+                updatedAt: new Date().toISOString(),
+              };
+            })
+          : prev.inventory;
+        return {
+          ...prev,
+          returns: prev.returns.filter((r) => r.id !== id),
+          inventory: nextInventory,
+        };
+      });
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'returns', id).catch(() => {});
+      }
+      notify('Return record deleted.', 'info');
+    },
+    [firebaseUser, notify]
+  );
+
   const addPayment = useCallback(
     (payment: Omit<PaymentRecord, 'id' | 'createdAt'>): PaymentRecord => {
       const created: PaymentRecord = {
@@ -547,6 +678,20 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [notify]
   );
 
+  const deletePayment = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        payments: prev.payments.filter((p) => p.id !== id),
+      }));
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'payments', id).catch(() => {});
+      }
+      notify('Payment record deleted.', 'info');
+    },
+    [firebaseUser, notify]
+  );
+
   const addReminderLog = useCallback((log: Omit<ReminderLog, 'id'>) => {
     const created: ReminderLog = { ...log, id: `rem-${Date.now()}` };
     setState((prev) => ({
@@ -554,6 +699,20 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       reminders: [created, ...prev.reminders],
     }));
   }, []);
+
+  const deleteReminderLog = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        reminders: prev.reminders.filter((r) => r.id !== id),
+      }));
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'reminders', id).catch(() => {});
+      }
+      notify('Reminder log deleted.', 'info');
+    },
+    [firebaseUser, notify]
+  );
 
   const updateReminderSettings = useCallback(
     (settings: Partial<ReminderSettings>) => {
@@ -595,8 +754,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const deleteStaffAccount = useCallback(
     (id: string) => {
+      let deleted = false;
       setState((prev) => {
         if (prev.staff.length <= 1) return prev;
+        deleted = true;
         const filtered = prev.staff.filter((u) => u.id !== id);
         return {
           ...prev,
@@ -605,9 +766,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             prev.activeStaffId === id ? filtered[0].id : prev.activeStaffId,
         };
       });
+      if (deleted && firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'staff', id).catch(() => {});
+      }
       notify('Staff account deleted.', 'info');
     },
-    [notify]
+    [firebaseUser, notify]
   );
 
   const exportBackupJson = useCallback(() => {
@@ -712,9 +876,15 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           ...prev,
           profile: data.profile ? { ...prev.profile, ...data.profile } : prev.profile,
           inventory: data.inventory && data.inventory.length > 0 ? data.inventory : prev.inventory,
+          purchases: data.purchases && data.purchases.length > 0 ? data.purchases : prev.purchases,
+          sales: data.sales && data.sales.length > 0 ? data.sales : prev.sales,
+          returns: data.returns && data.returns.length > 0 ? data.returns : prev.returns,
+          payments: data.payments && data.payments.length > 0 ? data.payments : prev.payments,
+          reminders: data.reminders && data.reminders.length > 0 ? data.reminders : prev.reminders,
+          staff: data.staff && data.staff.length > 0 ? data.staff : prev.staff,
         }));
         setLastSyncedAt(new Date().toLocaleTimeString());
-        notify('Restored cloud profile & inventory from Firestore.');
+        notify('Restored full cloud workspace data from Firestore.');
       }
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Cloud pull failed.', 'error');
@@ -744,11 +914,16 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         deleteInventoryItem,
         addPurchase,
         payPurchaseBalance,
+        deletePurchase,
         addSale,
         recordSalePayment,
+        deleteSale,
         addReturn,
+        deleteReturn,
         addPayment,
+        deletePayment,
         addReminderLog,
+        deleteReminderLog,
         updateReminderSettings,
         addStaffAccount,
         updateStaffAccount,

@@ -4,6 +4,7 @@ import {
   ArrowUpRight,
   FileSpreadsheet,
   Gem,
+  Printer,
   QrCode,
   Receipt,
   Save,
@@ -14,6 +15,7 @@ import {
 import { useBusiness } from '../context/BusinessContext';
 import { computeItemFinalPkr, formatMoney } from '../utils/currency';
 import { InvoiceModal } from '../components/InvoiceModal';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 import { SalesOrder } from '../types/business';
 
 export const DashboardView: React.FC = () => {
@@ -23,6 +25,7 @@ export const DashboardView: React.FC = () => {
     sales,
     purchases,
     updateProfile,
+    deleteSale,
     setActiveModule,
     hasPermission,
   } = useBusiness();
@@ -34,6 +37,7 @@ export const DashboardView: React.FC = () => {
 
   const canEditRates = hasPermission('edit_rates_profile');
   const canViewProfit = hasPermission('view_profit');
+  const canDeleteSales = hasPermission('create_sales');
 
   const totalStockValuePkr = inventory.reduce((sum, item) => {
     const { finalPkr } = computeItemFinalPkr(item.baseSellPrice, item.sellCurrency, profile);
@@ -249,6 +253,7 @@ export const DashboardView: React.FC = () => {
                   <th className="py-3 px-4 font-medium">Currency / Rate</th>
                   <th className="py-3 px-4 font-medium text-right">Final Total</th>
                   <th className="py-3 px-4 font-medium">Status</th>
+                  <th className="py-3 px-4 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -282,6 +287,27 @@ export const DashboardView: React.FC = () => {
                       >
                         {sale.paymentStatus}
                       </span>
+                    </td>
+                    <td
+                      className="py-3 px-4 text-right whitespace-nowrap"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOrder(sale)}
+                          title="Open Invoice Preview"
+                          className="p-1.5 rounded-md text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </button>
+                        {canDeleteSales && (
+                          <DeleteActionButton
+                            onConfirm={() => deleteSale(sale.id)}
+                            title={`Delete invoice ${sale.invoiceNo}`}
+                          />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

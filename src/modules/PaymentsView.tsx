@@ -3,6 +3,7 @@ import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Wallet } from 'lucide-react'
 import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode, PaymentRecord } from '../types/business';
 import { formatMoney, getRateForCurrency } from '../utils/currency';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 export const PaymentsView: React.FC = () => {
   const {
@@ -11,6 +12,7 @@ export const PaymentsView: React.FC = () => {
     purchases,
     profile,
     addPayment,
+    deletePayment,
     recordSalePayment,
     payPurchaseBalance,
     hasPermission,
@@ -374,6 +376,7 @@ export const PaymentsView: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Method / Ref</th>
                 <th className="py-3 px-4 font-semibold text-right">Original Amount</th>
                 <th className="py-3 px-4 font-semibold text-right">PKR Equivalent</th>
+                <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -405,6 +408,14 @@ export const PaymentsView: React.FC = () => {
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
                     {formatMoney(p.amountPkr, 'PKR')}
+                  </td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap">
+                    {canManage && (
+                      <DeleteActionButton
+                        onConfirm={() => deletePayment(p.id)}
+                        title={`Delete payment ${p.referenceNo}`}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}

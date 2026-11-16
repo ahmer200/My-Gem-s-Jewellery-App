@@ -173,7 +173,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'ownerId', 'returnNo', 'invoiceNo', 'customerName', 'sku', 'productName',
           'quantity', 'reason', 'restocked', 'refundCurrency', 'exchangeRateApplied',
-          'refundAmountOrig', 'refundAmountPkr', 'returnDate', 'createdAt', 'updatedAt'
+          'refundAmountOrig', 'refundAmountPkr', 'itemsPayload', 'returnDate', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && (data.ownerId == request.auth.uid || isBootstrappedAdmin())
@@ -189,6 +189,7 @@ service cloud.firestore {
         && (!('exchangeRateApplied' in data) || (data.exchangeRateApplied is number && data.exchangeRateApplied >= 0))
         && (!('refundAmountOrig' in data) || (data.refundAmountOrig is number && data.refundAmountOrig >= 0))
         && data.refundAmountPkr is number && data.refundAmountPkr >= 0
+        && (!('itemsPayload' in data) || (data.itemsPayload is string && data.itemsPayload.size() <= 12000))
         && data.returnDate is string && data.returnDate.size() <= 40
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;

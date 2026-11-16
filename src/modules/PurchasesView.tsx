@@ -3,6 +3,7 @@ import { CheckCircle2, Plus, ShoppingBag } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode } from '../types/business';
 import { formatMoney, getRateForCurrency } from '../utils/currency';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 export const PurchasesView: React.FC = () => {
   const {
@@ -11,6 +12,7 @@ export const PurchasesView: React.FC = () => {
     profile,
     addPurchase,
     payPurchaseBalance,
+    deletePurchase,
     hasPermission,
     notify,
   } = useBusiness();
@@ -322,7 +324,7 @@ export const PurchasesView: React.FC = () => {
                 <th className="py-3 px-4 font-semibold text-right">Total (PKR)</th>
                 <th className="py-3 px-4 font-semibold text-right">Payable Balance</th>
                 <th className="py-3 px-4 font-semibold">Status</th>
-                <th className="py-3 px-4 font-semibold text-right">Settle</th>
+                <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -364,15 +366,23 @@ export const PurchasesView: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
-                      {payable > 1 && (
-                        <button
-                          onClick={() => payPurchaseBalance(pur.id, payable)}
-                          className="inline-flex items-center gap-1 rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-800"
-                        >
-                          <CheckCircle2 className="w-3 h-3" />
-                          Mark Paid
-                        </button>
-                      )}
+                      <div className="inline-flex items-center gap-1.5">
+                        {payable > 1 && canRecord && (
+                          <button
+                            onClick={() => payPurchaseBalance(pur.id, payable)}
+                            className="inline-flex items-center gap-1 rounded bg-emerald-700 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-emerald-800"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            Mark Paid
+                          </button>
+                        )}
+                        {canRecord && (
+                          <DeleteActionButton
+                            onConfirm={() => deletePurchase(pur.id)}
+                            title={`Delete purchase ${pur.referenceNo}`}
+                          />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

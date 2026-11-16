@@ -14,9 +14,11 @@ import {
   calculateInvoiceTotals,
   convertToPkr,
   formatMoney,
+  getLineItemAmounts,
 } from '../utils/currency';
 import { exportInvoicePdf } from '../utils/exporters';
 import { InvoiceModal } from '../components/InvoiceModal';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 export const SalesView: React.FC = () => {
   const {
@@ -25,6 +27,7 @@ export const SalesView: React.FC = () => {
     profile,
     activeOperator,
     addSale,
+    deleteSale,
     hasPermission,
     posQueuedSku,
     setPosQueuedSku,
@@ -124,9 +127,16 @@ export const SalesView: React.FC = () => {
           quantity: 1,
           unitPriceOrig: Number(unitInSource.toFixed(2)),
           unitCostPkr,
+          markupPercent: Math.max(0, Number(markupPercent) || 0),
         },
       ];
     });
+  };
+
+  const applyGlobalPercentToCart = () => {
+    const pct = Math.max(0, Number(markupPercent) || 0);
+    setCart((prev) => prev.map((li) => ({ ...li, markupPercent: pct })));
+    notify(`Applied ${pct}% markup to all ${cart.length} invoice items.`, 'info');
   };
 
   const baseSubtotal = useMemo(
@@ -148,10 +158,11 @@ export const SalesView: React.FC = () => {
           rmbRateUsed: Number(rmbRate) || 0,
           usdRateUsed: Number(usdRate) || 0,
           markupPercentUsed: Number(markupPercent) || 0,
+          items: cart,
         },
         profile
       ),
-    [baseSubtotal, sourceCurrency, rmbRate, usdRate, markupPercent, profile]
+    [baseSubtotal, sourceCurrency, rmbRate, usdRate, markupPercent, cart, profile]
   );
 
   const profitPkr = calc.finalTotalPkrEquivalent - totalCostPkr;
@@ -187,7 +198,7 @@ export const SalesView: React.FC = () => {
       sourceCurrency,
       rmbRateUsed: Number(rmbRate) || 0,
       usdRateUsed: Number(usdRate) || 0,
-      markupPercentUsed: Number(markupPercent) || 0,
+      markupPercentUsed: calc.markupPercentUsed,
       finalCurrency: calc.finalCurrency,
       exchangeRateApplied: calc.exchangeRateApplied,
       baseSubtotal: calc.baseSubtotal,
@@ -349,16 +360,28 @@ export const SalesView: React.FC = () => {
               </div>
               <div>
                 <label className="block font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  Custom Markup %
+                  Default Item Markup %
                 </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  value={markupPercent}
-                  onChange={(e) => setMarkupPercent(e.target.value)}
-                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 font-mono"
-                />
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    value={markupPercent}
+                    onChange={(e) => setMarkupPercent(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 font-mono"
+                  />
+                  {cart.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={applyGlobalPercentToCart}
+                      title="Apply this % to every item in the cart"
+                      className="rounded-lg border border-emerald-700 px-2.5 py-2 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 whitespace-nowrap shrink-0"
+                    >
+                      Apply All
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
             <p className="mt-2.5 text-[11px] font-mono text-emerald-800 dark:text-emerald-400">
@@ -398,73 +421,124 @@ export const SalesView: React.FC = () => {
                   <tr>
                     <th className="py-2.5 px-3">SKU</th>
                     <th className="py-2.5 px-3">Product</th>
-                    <th className="py-2.5 px-3 w-24">Qty</th>
-                    <th className="py-2.5 px-3 w-36">Unit Price ({sourceCurrency})</th>
-                    <th className="py-2.5 px-3 text-right">Line Subtotal</th>
+                    <th className="py-2.5 px-3 w-20">Qty</th>
+                    <th className="py-2.5 px-3 w-32">Unit ({sourceCurrency})</th>
+                    <th className="py-2.5 px-3 w-28">Item %</th>
+                    <th className="py-2.5 px-3 text-right">Base</th>
+                    <th className="py-2.5 px-3 text-right">Line Total (w/ %)</th>
                     <th className="py-2.5 px-3 text-right">Remove</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                  {cart.map((li) => (
-                    <tr key={li.inventoryId}>
-                      <td className="py-2.5 px-3 font-mono font-semibold">{li.sku}</td>
-                      <td className="py-2.5 px-3">
-                        <p className="font-medium text-slate-900 dark:text-white">
-                          {li.productName}
-                        </p>
-                        <p className="text-[11px] text-slate-500">{li.gemstoneDetails}</p>
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <input
-                          type="number"
-                          min="1"
-                          value={li.quantity}
-                          onChange={(e) => {
-                            const val = Math.max(1, Number(e.target.value) || 1);
-                            setCart((prev) =>
-                              prev.map((c) =>
-                                c.inventoryId === li.inventoryId ? { ...c, quantity: val } : c
+                  {cart.map((li) => {
+                    const fallbackPct = Math.max(0, Number(markupPercent) || 0);
+                    const { lineBaseOrig, percentUsed, lineTotalOrig } = getLineItemAmounts(
+                      li,
+                      fallbackPct
+                    );
+                    const linePkrTotal =
+                      !calc.isOriginalCurrencyMode && calc.finalCurrency === 'PKR'
+                        ? lineTotalOrig * calc.exchangeRateApplied
+                        : null;
+
+                    return (
+                      <tr key={li.inventoryId}>
+                        <td className="py-2.5 px-3 font-mono font-semibold whitespace-nowrap">
+                          {li.sku}
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <p className="font-medium text-slate-900 dark:text-white">
+                            {li.productName}
+                          </p>
+                          <p className="text-[11px] text-slate-500">{li.gemstoneDetails}</p>
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="number"
+                            min="1"
+                            value={li.quantity}
+                            onChange={(e) => {
+                              const val = Math.max(1, Number(e.target.value) || 1);
+                              setCart((prev) =>
+                                prev.map((c) =>
+                                  c.inventoryId === li.inventoryId ? { ...c, quantity: val } : c
+                                )
+                              );
+                            }}
+                            className="w-18 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 font-mono"
+                          />
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={li.unitPriceOrig}
+                            onChange={(e) => {
+                              const val = Math.max(0, Number(e.target.value) || 0);
+                              setCart((prev) =>
+                                prev.map((c) =>
+                                  c.inventoryId === li.inventoryId
+                                    ? { ...c, unitPriceOrig: val }
+                                    : c
+                                )
+                              );
+                            }}
+                            className="w-28 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 font-mono"
+                          />
+                        </td>
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              value={percentUsed}
+                              onChange={(e) => {
+                                const val = Math.max(0, Number(e.target.value) || 0);
+                                setCart((prev) =>
+                                  prev.map((c) =>
+                                    c.inventoryId === li.inventoryId
+                                      ? { ...c, markupPercent: val }
+                                      : c
+                                  )
+                                );
+                              }}
+                              className="w-20 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 font-mono"
+                            />
+                            <span className="text-slate-500 font-mono">%</span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                          {formatMoney(lineBaseOrig, sourceCurrency)}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono whitespace-nowrap">
+                          <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+                            {formatMoney(lineTotalOrig, sourceCurrency)}
+                          </p>
+                          {linePkrTotal !== null && sourceCurrency !== 'PKR' && (
+                            <p className="text-[10px] text-slate-500">
+                              = {formatMoney(linePkrTotal, 'PKR')}
+                            </p>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCart((prev) =>
+                                prev.filter((c) => c.inventoryId !== li.inventoryId)
                               )
-                            );
-                          }}
-                          className="w-20 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 font-mono"
-                        />
-                      </td>
-                      <td className="py-2.5 px-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={li.unitPriceOrig}
-                          onChange={(e) => {
-                            const val = Math.max(0, Number(e.target.value) || 0);
-                            setCart((prev) =>
-                              prev.map((c) =>
-                                c.inventoryId === li.inventoryId
-                                  ? { ...c, unitPriceOrig: val }
-                                  : c
-                              )
-                            );
-                          }}
-                          className="w-32 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 font-mono"
-                        />
-                      </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-semibold whitespace-nowrap">
-                        {formatMoney(li.unitPriceOrig * li.quantity, sourceCurrency)}
-                      </td>
-                      <td className="py-2.5 px-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setCart((prev) => prev.filter((c) => c.inventoryId !== li.inventoryId))
-                          }
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                            }
+                            className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded"
+                            aria-label={`Remove ${li.sku}`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -641,6 +715,12 @@ export const SalesView: React.FC = () => {
                         <FileDown className="w-3.5 h-3.5" />
                         PDF
                       </button>
+                      {canCreate && (
+                        <DeleteActionButton
+                          onConfirm={() => deleteSale(sale.id)}
+                          title={`Delete invoice ${sale.invoiceNo}`}
+                        />
+                      )}
                     </div>
                   </td>
                 </tr>

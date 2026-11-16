@@ -10,6 +10,7 @@ import {
   computeItemFinalPkr,
   convertToPkr,
   formatMoney,
+  getLineItemAmounts,
   getRateForCurrency,
 } from './currency';
 
@@ -174,16 +175,33 @@ export function buildInvoicePdfDoc(
 
   autoTable(doc, {
     startY: 68,
-    head: [['SKU', 'Product & Gemstone Details', 'Cert #', 'Qty', `Unit Price (${order.sourceCurrency})`, `Line Total (${order.sourceCurrency})`]],
-    body: order.items.map((item) => [
-      item.sku,
-      `${item.productName}\n${item.gemstoneDetails}`,
-      item.certNumber || '—',
-      String(item.quantity),
-      formatMoney(item.unitPriceOrig, order.sourceCurrency),
-      formatMoney(item.unitPriceOrig * item.quantity, order.sourceCurrency),
-    ]),
-    styles: { fontSize: 8.5, cellPadding: 2.5 },
+    head: [
+      [
+        'SKU',
+        'Product & Gemstone Details',
+        'Cert #',
+        'Qty',
+        `Unit (${order.sourceCurrency})`,
+        'Item %',
+        `Total w/ % (${order.sourceCurrency})`,
+      ],
+    ],
+    body: order.items.map((item) => {
+      const { percentUsed, lineTotalOrig } = getLineItemAmounts(
+        item,
+        order.markupPercentUsed
+      );
+      return [
+        item.sku,
+        `${item.productName}\n${item.gemstoneDetails}`,
+        item.certNumber || '—',
+        String(item.quantity),
+        formatMoney(item.unitPriceOrig, order.sourceCurrency),
+        `+${percentUsed}%`,
+        formatMoney(lineTotalOrig, order.sourceCurrency),
+      ];
+    }),
+    styles: { fontSize: 8.2, cellPadding: 2.3 },
     headStyles: { fillColor: [6, 78, 59], textColor: 255 },
   });
 

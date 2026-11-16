@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth';
 import {
   collection,
+  deleteDoc,
   doc,
   getDocFromServer,
   getDocs,
@@ -257,13 +258,14 @@ export async function pushWorkspaceToCloud(uid: string, payload: SyncPayload): P
       customerName: ret.customerName.slice(0, 140),
       sku: ret.sku.slice(0, 64),
       productName: ret.productName.slice(0, 200),
-      quantity: Number(ret.quantity) || 1,
+      quantity: Math.max(1, Number(ret.quantity) || 1),
       reason: ret.reason.slice(0, 300),
       restocked: Boolean(ret.restocked),
       refundCurrency: ret.refundCurrency,
       exchangeRateApplied: Number(ret.exchangeRateApplied) || 0,
       refundAmountOrig: Number(ret.refundAmountOrig) || 0,
       refundAmountPkr: Number(ret.refundAmountPkr) || 0,
+      itemsPayload: ret.items ? JSON.stringify(ret.items).slice(0, 11500) : '[]',
       returnDate: ret.returnDate.slice(0, 40),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
@@ -286,6 +288,22 @@ export async function pushWorkspaceToCloud(uid: string, payload: SyncPayload): P
       method: pay.method.slice(0, 60),
       paymentDate: pay.paymentDate.slice(0, 40),
       notes: (pay.notes || '').slice(0, 400),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    syncedCount++;
+  }
+
+  for (const rem of payload.reminders) {
+    const id = safeDocId(rem.id);
+    batch.set(doc(db, `${wsPath}/reminders/${id}`), {
+      ownerId: uid,
+      customerName: rem.customerName.slice(0, 140),
+      customerPhone: (rem.customerPhone || '').slice(0, 40),
+      invoiceNo: (rem.invoiceNo || '').slice(0, 64),
+      channel: rem.channel,
+      message: (rem.message || '').slice(0, 1000),
+      sentDate: rem.sentDate.slice(0, 40),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -316,17 +334,56 @@ export async function pushWorkspaceToCloud(uid: string, payload: SyncPayload): P
   return syncedCount;
 }
 
+export async function deleteCloudDocument(
+  uid: string,
+  subcollection: 'inventory' | 'purchases' | 'sales' | 'returns' | 'payments' | 'reminders' | 'staff',
+  docId: string
+): Promise<void> {
+  const workspaceId = safeDocId(uid);
+  const id = safeDocId(docId);
+  const targetPath = `workspaces/${workspaceId}/${subcollection}/${id}`;
+  try {
+    await deleteDoc(doc(db, targetPath));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, targetPath);
+  }
+}
+
 export async function pullWorkspaceFromCloud(uid: string): Promise<Partial<SyncPayload> | null> {
   const workspaceId = safeDocId(uid);
   const wsPath = `workspaces/${workspaceId}`;
 
   try {
-    const [settingsSnap, invSnap] = await Promise.all([
+    const [
+      settingsSnap,
+      invSnap,
+      purSnap,
+      salesSnap,
+      retSnap,
+      paySnap,
+      remSnap,
+      staffSnap,
+    ] = await Promise.all([
       getDocs(collection(db, `${wsPath}/settings`)),
       getDocs(collection(db, `${wsPath}/inventory`)),
+      getDocs(collection(db, `${wsPath}/purchases`)),
+      getDocs(collection(db, `${wsPath}/sales`)),
+      getDocs(collection(db, `${wsPath}/returns`)),
+      getDocs(collection(db, `${wsPath}/payments`)),
+      getDocs(collection(db, `${wsPath}/reminders`)),
+      getDocs(collection(db, `${wsPath}/staff`)),
     ]);
 
-    if (settingsSnap.empty && invSnap.empty) {
+    if (
+      settingsSnap.empty &&
+      invSnap.empty &&
+      purSnap.empty &&
+      salesSnap.empty &&
+      retSnap.empty &&
+      paySnap.empty &&
+      remSnap.empty &&
+      staffSnap.empty
+    ) {
       return null;
     }
 
@@ -379,6 +436,177 @@ export async function pullWorkspaceFromCloud(uid: string): Promise<Partial<SyncP
           notes: data.notes || '',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
+        };
+      });
+    }
+
+    if (!purSnap.empty) {
+      out.purchases = purSnap.docs.map((d) => {
+        const data = d.data();
+        let parsedItems = [];
+        try {
+          parsedItems = data.itemsSummary ? JSON.parse(data.itemsSummary) : [];
+        } catch {
+          parsedItems = [];
+        }
+        return {
+          id: d.id,
+          referenceNo: data.referenceNo || '',
+          supplierName: data.supplierName || '',
+          supplierContact: data.supplierContact || '',
+          purchaseDate: data.purchaseDate || '',
+          currency: data.currency || 'PKR',
+          exchangeRateApplied: Number(data.exchangeRateApplied) || 1,
+          itemCostOrig: Number(data.itemCostOrig) || 0,
+          importCostOrig: Number(data.importCostOrig) || 0,
+          totalOrig: Number(data.totalOrig) || 0,
+          totalPkr: Number(data.totalPkr) || 0,
+          paidPkr: Number(data.paidPkr) || 0,
+          status: data.status || 'Paid',
+          items: Array.isArray(parsedItems) ? parsedItems : [],
+          createdAt: new Date().toISOString(),
+        };
+      });
+    }
+
+    if (!salesSnap.empty) {
+      out.sales = salesSnap.docs.map((d) => {
+        const data = d.data();
+        let parsedItems = [];
+        try {
+          parsedItems = data.itemsPayload ? JSON.parse(data.itemsPayload) : [];
+        } catch {
+          parsedItems = [];
+        }
+        const sourceCurrency = data.sourceCurrency || 'PKR';
+        const finalCurrency = data.finalCurrency || 'PKR';
+        const rmbRateUsed = Number(data.rmbRateUsed) || 0;
+        const usdRateUsed = Number(data.usdRateUsed) || 0;
+        const baseSubtotal = Number(data.baseSubtotal) || 0;
+        const convertedAmountPkr = Number(data.convertedAmountPkr) || 0;
+        const finalTotal = Number(data.finalTotal) || 0;
+        const exchangeRateApplied =
+          sourceCurrency === 'PKR'
+            ? 1
+            : rmbRateUsed === 0
+              ? 0
+              : sourceCurrency === 'RMB'
+                ? rmbRateUsed
+                : usdRateUsed;
+        const preMarkup =
+          finalCurrency === 'PKR' && sourceCurrency !== 'PKR' ? convertedAmountPkr : baseSubtotal;
+        return {
+          id: d.id,
+          invoiceNo: data.invoiceNo || '',
+          customerName: data.customerName || '',
+          customerPhone: data.customerPhone || '',
+          customerAddress: data.customerAddress || '',
+          orderDate: data.orderDate || '',
+          sourceCurrency,
+          rmbRateUsed,
+          usdRateUsed,
+          markupPercentUsed: Number(data.markupPercentUsed) || 0,
+          finalCurrency,
+          exchangeRateApplied,
+          baseSubtotal,
+          convertedAmountPkr,
+          markupAmount: Math.max(0, finalTotal - preMarkup),
+          finalTotal,
+          finalTotalPkrEquivalent: Number(data.finalTotalPkrEquivalent) || finalTotal,
+          totalCostPkr: Number(data.totalCostPkr) || 0,
+          profitPkr: Number(data.profitPkr) || 0,
+          paidAmountPkr: Number(data.paidAmountPkr) || 0,
+          paymentStatus: data.paymentStatus || 'Paid',
+          items: Array.isArray(parsedItems) ? parsedItems : [],
+          createdBy: 'Cloud Sync',
+          createdAt: new Date().toISOString(),
+        };
+      });
+    }
+
+    if (!retSnap.empty) {
+      out.returns = retSnap.docs.map((d) => {
+        const data = d.data();
+        let parsedItems = undefined;
+        try {
+          const raw = data.itemsPayload ? JSON.parse(data.itemsPayload) : undefined;
+          if (Array.isArray(raw) && raw.length > 0) parsedItems = raw;
+        } catch {
+          parsedItems = undefined;
+        }
+        return {
+          id: d.id,
+          returnNo: data.returnNo || '',
+          invoiceNo: data.invoiceNo || '',
+          customerName: data.customerName || '',
+          sku: data.sku || '',
+          productName: data.productName || '',
+          quantity: Number(data.quantity) || 1,
+          reason: data.reason || '',
+          restocked: Boolean(data.restocked),
+          refundCurrency: data.refundCurrency || 'PKR',
+          exchangeRateApplied: Number(data.exchangeRateApplied) || 1,
+          refundAmountOrig: Number(data.refundAmountOrig) || 0,
+          refundAmountPkr: Number(data.refundAmountPkr) || 0,
+          items: parsedItems,
+          returnDate: data.returnDate || '',
+          createdAt: new Date().toISOString(),
+        };
+      });
+    }
+
+    if (!paySnap.empty) {
+      out.payments = paySnap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          type: data.type || 'Incoming',
+          category: data.category || '',
+          partyName: data.partyName || '',
+          referenceNo: data.referenceNo || '',
+          currency: data.currency || 'PKR',
+          exchangeRateApplied: Number(data.exchangeRateApplied) || 1,
+          amountOrig: Number(data.amountOrig) || 0,
+          amountPkr: Number(data.amountPkr) || 0,
+          method: data.method || 'Cash',
+          paymentDate: data.paymentDate || '',
+          notes: data.notes || '',
+          createdAt: new Date().toISOString(),
+        };
+      });
+    }
+
+    if (!remSnap.empty) {
+      out.reminders = remSnap.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          customerName: data.customerName || '',
+          customerPhone: data.customerPhone || '',
+          invoiceNo: data.invoiceNo || '',
+          dueAmountLabel: '',
+          channel: data.channel || 'WhatsApp',
+          message: data.message || '',
+          sentDate: data.sentDate || '',
+        };
+      });
+    }
+
+    if (!staffSnap.empty) {
+      out.staff = staffSnap.docs.map((d) => {
+        const data = d.data();
+        const perms = typeof data.permissionsList === 'string' && data.permissionsList
+          ? (data.permissionsList.split(',') as StaffAccount['permissions'])
+          : [];
+        return {
+          id: d.id,
+          name: data.name || 'User',
+          email: data.email || '',
+          pin: '0000',
+          role: data.role || 'staff',
+          active: Boolean(data.active),
+          permissions: perms,
+          createdAt: new Date().toISOString(),
         };
       });
     }

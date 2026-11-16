@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { BellRing, Copy, MessageCircle, Save, Smartphone } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { formatMoney } from '../utils/currency';
+import { DeleteActionButton } from '../components/DeleteActionButton';
 
 export const RemindersView: React.FC = () => {
   const {
@@ -10,6 +11,7 @@ export const RemindersView: React.FC = () => {
     reminderSettings,
     updateReminderSettings,
     addReminderLog,
+    deleteReminderLog,
     hasPermission,
     notify,
   } = useBusiness();
@@ -259,16 +261,25 @@ export const RemindersView: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Customer</th>
                 <th className="py-3 px-4 font-semibold">Invoice</th>
                 <th className="py-3 px-4 font-semibold text-right">Due Amount</th>
+                <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
               {reminders.map((log) => (
-                <tr key={log.id}>
+                <tr key={log.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                   <td className="py-3 px-4 font-mono whitespace-nowrap">{log.sentDate}</td>
                   <td className="py-3 px-4 font-semibold whitespace-nowrap">{log.channel}</td>
                   <td className="py-3 px-4">{log.customerName}</td>
                   <td className="py-3 px-4 font-mono">{log.invoiceNo}</td>
-                  <td className="py-3 px-4 text-right font-mono">{log.dueAmountLabel}</td>
+                  <td className="py-3 px-4 text-right font-mono">{log.dueAmountLabel || '—'}</td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap">
+                    {canSend && (
+                      <DeleteActionButton
+                        onConfirm={() => deleteReminderLog(log.id)}
+                        title={`Delete reminder log for ${log.invoiceNo}`}
+                      />
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
