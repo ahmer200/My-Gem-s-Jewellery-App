@@ -13,7 +13,12 @@ interface QrTagModalProps {
 export const QrTagModal: React.FC<QrTagModalProps> = ({ item, onClose }) => {
   const { profile } = useBusiness();
   const [qrUrl, setQrUrl] = useState<string>('');
-  const calc = computeItemFinalPkr(item.baseSellPrice, item.sellCurrency, profile);
+  const calc = computeItemFinalPkr(
+    item.baseSellPrice,
+    item.sellCurrency,
+    profile,
+    item.sellExchangeRate
+  );
 
   useEffect(() => {
     const payload = JSON.stringify({
@@ -67,7 +72,7 @@ export const QrTagModal: React.FC<QrTagModalProps> = ({ item, onClose }) => {
               {item.weightCarats} ct · {item.colour} · {item.certLab} {item.certNumber}
             </p>
             <p className="mt-2 font-mono text-xs font-bold text-emerald-800">
-              {formatMoney(calc.finalPkr, 'PKR')}
+              {formatMoney(calc.finalDisplayAmount, calc.finalCurrency)}
             </p>
           </div>
         </div>

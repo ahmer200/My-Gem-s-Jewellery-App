@@ -4,11 +4,13 @@ import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode } from '../types/business';
 import { formatMoney, getRateForCurrency } from '../utils/currency';
 import { DeleteActionButton } from '../components/DeleteActionButton';
+import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
 
 export const PurchasesView: React.FC = () => {
   const {
     inventory,
     purchases,
+    parties,
     profile,
     addPurchase,
     payPurchaseBalance,
@@ -19,11 +21,14 @@ export const PurchasesView: React.FC = () => {
 
   const canRecord = hasPermission('record_purchases');
 
+  const initialCur = profile.defaultCurrency || 'CNY';
   const [supplierName, setSupplierName] = useState('');
   const [supplierContact, setSupplierContact] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
-  const [currency, setCurrency] = useState<CurrencyCode>('RMB');
-  const [customRate, setCustomRate] = useState<string>(String(profile.rmbToPkr));
+  const [currency, setCurrency] = useState<CurrencyCode>(initialCur);
+  const [customRate, setCustomRate] = useState<string>(
+    String(getRateForCurrency(initialCur, profile))
+  );
   const [selectedItemId, setSelectedItemId] = useState<string>(inventory[0]?.id || '');
   const [quantity, setQuantity] = useState<number>(1);
   const [unitCostOrig, setUnitCostOrig] = useState<number>(0);
@@ -34,15 +39,16 @@ export const PurchasesView: React.FC = () => {
 
   const handleCurrencyChange = (nextCur: CurrencyCode) => {
     setCurrency(nextCur);
-    const rate = getRateForCurrency(nextCur, profile.rmbToPkr, profile.usdToPkr);
+    const rate = getRateForCurrency(nextCur, profile);
     setCustomRate(String(rate));
   };
 
   const activeRate = currency === 'PKR' ? 1 : Math.max(0, Number(customRate) || 0);
+  const isOriginalCurrencyMode = currency !== 'PKR' && activeRate === 0;
   const itemCostOrig = quantity * unitCostOrig;
   const totalOrig = itemCostOrig + importCostOrig;
   const totalPkr = useMemo(
-    () => (currency === 'PKR' ? totalOrig : totalOrig * activeRate),
+    () => (currency === 'PKR' || activeRate === 0 ? totalOrig : totalOrig * activeRate),
     [currency, totalOrig, activeRate]
   );
 
@@ -107,7 +113,7 @@ export const PurchasesView: React.FC = () => {
           Purchase Management & Import Costing
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Enter supplier purchases in RMB, USD, or PKR with freight/import costs and auto PKR conversion
+          Enter supplier purchases in any world currency with conversion rate (0 = keep in selected currency)
         </p>
       </div>
 
@@ -116,11 +122,50 @@ export const PurchasesView: React.FC = () => {
           onSubmit={handleSavePurchase}
           className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-4 text-xs"
         >
-          <div className="flex items-center gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
-            <ShoppingBag className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
-            <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-              Record New Supplier Purchase
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <ShoppingBag className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+              <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                Record New Supplier Purchase
+              </h2>
+            </div>
+            {(() => {
+              const vendorParties = parties.filter(
+                (p) => p.partyType === 'Vendor' || p.partyType === 'Both'
+              );
+              const matchedVendor = vendorParties.find(
+                (p) => p.name.trim().toLowerCase() === supplierName.trim().toLowerCase()
+              );
+              if (vendorParties.length === 0) return null;
+              return (
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={matchedVendor?.id || ''}
+                    onChange={(e) => {
+                      const picked = vendorParties.find((v) => v.id === e.target.value);
+                      if (!picked) return;
+                      setSupplierName(picked.name);
+                      setSupplierContact(picked.contactNumber);
+                    }}
+                    className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-xs"
+                  >
+                    <option value="">-- Quick-Fill Vendor --</option>
+                    {vendorParties.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name} ({v.city || 'No city'}) — Limit:{' '}
+                        {formatMoney(v.creditLimit, v.creditCurrency)}
+                      </option>
+                    ))}
+                  </select>
+                  {matchedVendor && (
+                    <span className="text-[11px] font-mono text-emerald-700 dark:text-emerald-400">
+                      {matchedVendor.city || '—'} · Limit:{' '}
+                      {formatMoney(matchedVendor.creditLimit, matchedVendor.creditCurrency)}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -181,27 +226,24 @@ export const PurchasesView: React.FC = () => {
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Cost Currency
               </label>
-              <select
+              <WorldCurrencySelect
                 value={currency}
-                onChange={(e) => handleCurrencyChange(e.target.value as CurrencyCode)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono font-semibold"
-              >
-                <option value="RMB">RMB (¥)</option>
-                <option value="USD">USD ($)</option>
-                <option value="PKR">PKR (Rs)</option>
-              </select>
+                onChange={handleCurrencyChange}
+                compact
+              />
             </div>
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Rate → PKR
+                Rate → PKR (0 = Orig)
               </label>
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 disabled={currency === 'PKR'}
                 value={currency === 'PKR' ? '1' : customRate}
                 onChange={(e) => setCustomRate(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono disabled:opacity-60"
+                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono disabled:opacity-60 min-h-[38px]"
               />
             </div>
             <div>
@@ -244,10 +286,10 @@ export const PurchasesView: React.FC = () => {
             </div>
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Converted PKR Total
+                {isOriginalCurrencyMode ? `Final Total (${currency})` : 'Converted PKR Total'}
               </label>
-              <div className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 font-mono font-bold text-emerald-800 dark:text-emerald-300">
-                {formatMoney(totalPkr, 'PKR')}
+              <div className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 font-mono font-bold text-emerald-800 dark:text-emerald-300 min-h-[38px]">
+                {formatMoney(isOriginalCurrencyMode ? totalOrig : totalPkr, isOriginalCurrencyMode ? currency : 'PKR')}
               </div>
             </div>
           </div>
@@ -343,16 +385,23 @@ export const PurchasesView: React.FC = () => {
                       </p>
                     </td>
                     <td className="py-3 px-4 font-mono whitespace-nowrap">
-                      {pur.currency} @ {pur.exchangeRateApplied}
+                      {pur.currency} ·{' '}
+                      {pur.currency !== 'PKR' && pur.exchangeRateApplied === 0
+                        ? 'Rate=0 (Orig)'
+                        : `@${pur.exchangeRateApplied}`}
                     </td>
                     <td className="py-3 px-4 text-right font-mono whitespace-nowrap">
                       {formatMoney(pur.totalOrig, pur.currency)}
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
-                      {formatMoney(pur.totalPkr, 'PKR')}
+                      {pur.currency !== 'PKR' && pur.exchangeRateApplied === 0
+                        ? formatMoney(pur.totalOrig, pur.currency)
+                        : formatMoney(pur.totalPkr, 'PKR')}
                     </td>
                     <td className="py-3 px-4 text-right font-mono text-amber-700 dark:text-amber-400 whitespace-nowrap">
-                      {formatMoney(payable, 'PKR')}
+                      {pur.currency !== 'PKR' && pur.exchangeRateApplied === 0
+                        ? formatMoney(payable, pur.currency)
+                        : formatMoney(payable, 'PKR')}
                     </td>
                     <td className="py-3 px-4 whitespace-nowrap font-semibold">
                       <span

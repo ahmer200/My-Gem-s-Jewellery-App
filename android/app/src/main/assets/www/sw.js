@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
+define(['./workbox-43e44e5a'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -77,9 +77,6 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "registerSW.js",
-    "revision": "402b66900e731ca748771b6fc5e7a068"
-  }, {
     "url": "pwa-maskable-512x512.png",
     "revision": "d02ace58929efbda34c228aac306eb74"
   }, {
@@ -90,7 +87,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "revision": "7ddd1c7df94a6dd53586b9f989fa9978"
   }, {
     "url": "index.html",
-    "revision": "22a6397eedbbe1054d663ffe99174df0"
+    "revision": "c949839d8a0512bf1fb39aa1bfa1efc3"
   }, {
     "url": "icon.svg",
     "revision": "99943b3ead5aa20d117f211b6344dbbe"
@@ -101,19 +98,22 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
     "url": "apple-touch-icon.png",
     "revision": "105c1f78193939d6ad2453a84c5c2ade"
   }, {
+    "url": "assets/workbox-window.prod.es5-Bd17z0YL.js",
+    "revision": null
+  }, {
     "url": "assets/purify.es-Dzkdzyfv.js",
     "revision": null
   }, {
-    "url": "assets/index.es-5fGpKSpF.js",
+    "url": "assets/index.es-CCNhMNSK.js",
     "revision": null
   }, {
-    "url": "assets/index-ftUr-lNx.css",
+    "url": "assets/index-Dj05RJUM.css",
     "revision": null
   }, {
-    "url": "assets/index-B_5GfrN4.js",
+    "url": "assets/index-DHI3RNEm.js",
     "revision": null
   }, {
-    "url": "assets/html2canvas-BT7nffg4.js",
+    "url": "assets/html2canvas-BzN_g_W7.js",
     "revision": null
   }, {
     "url": "assets/aistudio/1792354305419_957ebff5.png",
@@ -139,6 +139,7 @@ define(['./workbox-afac4cd2'], (function (workbox) { 'use strict';
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html")));
+  workbox.registerRoute(/\/version\.json(\?.*)?$/i, new workbox.NetworkOnly(), 'GET');
   workbox.registerRoute(/^https:\/\/fonts\.googleapis\.com\/.*/i, new workbox.CacheFirst({
     "cacheName": "google-fonts-cache",
     plugins: [new workbox.ExpirationPlugin({

@@ -1,6 +1,7 @@
 import {
   CompanyProfile,
   InventoryItem,
+  PartyAccount,
   PaymentRecord,
   PurchaseRecord,
   ReminderLog,
@@ -9,6 +10,8 @@ import {
   SalesOrder,
   StaffAccount,
 } from '../types/business';
+
+import { DEFAULT_CURRENCY_RATES_PKR } from './worldCurrencies';
 
 export const DEFAULT_LOGO_PATH = '/src/assets/images/na_gems_emblem_1794696118590.jpg';
 
@@ -20,6 +23,8 @@ export const INITIAL_PROFILE: CompanyProfile = {
   whatsapp: '923005550192',
   email: 'ahmer.iqbal.khan@gmail.com',
   ntn: 'NTN-4829104-7',
+  defaultCurrency: 'CNY',
+  currencyRates: { ...DEFAULT_CURRENCY_RATES_PKR },
   rmbToPkr: 39.5,
   usdToPkr: 278.5,
   defaultMarkupPercent: 15,
@@ -247,6 +252,8 @@ export const INITIAL_SALES: SalesOrder[] = [
     profitPkr: 153062.5,
     paidAmountPkr: 300000,
     paymentStatus: 'Partial',
+    courierCharges: 1500,
+    dispatchStatus: 'Pending',
     items: [
       {
         inventoryId: 'inv-002',
@@ -286,6 +293,10 @@ export const INITIAL_SALES: SalesOrder[] = [
     profitPkr: 162922.5,
     paidAmountPkr: 566747.5,
     paymentStatus: 'Paid',
+    courierCharges: 45,
+    dispatchStatus: 'Dispatched',
+    expectedArrivalDate: '2026-11-16',
+    dispatchedAt: '2026-11-11T17:15:00.000Z',
     items: [
       {
         inventoryId: 'inv-001',
@@ -299,7 +310,7 @@ export const INITIAL_SALES: SalesOrder[] = [
         markupPercent: 10,
       },
     ],
-    notes: 'Export invoice settled in USD (RMB=0 Original Currency Mode).',
+    notes: 'Export invoice settled in USD (Rate = 0 Original Currency Mode).',
     createdBy: 'Nazim Ahmer',
     createdAt: '2026-11-11T16:45:00.000Z',
   },
@@ -444,5 +455,86 @@ export const INITIAL_STAFF: StaffAccount[] = [
       'send_reminders',
     ],
     createdAt: '2026-10-15T09:00:00.000Z',
+  },
+];
+
+export const INITIAL_PARTIES: PartyAccount[] = [
+  {
+    id: 'pty-cust-001',
+    partyType: 'Customer',
+    name: 'Haji Tariq Mehmood Jewellers',
+    contactNumber: '923215550148',
+    address: 'Shop #22, Main Sarafa Bazaar',
+    city: 'Rawalpindi',
+    creditLimit: 1000000,
+    creditCurrency: 'PKR',
+    notes: 'Regular wholesale buyer for Muzo emeralds and Kashmir sapphires.',
+    createdAt: '2026-10-05T09:00:00.000Z',
+    updatedAt: '2026-11-09T11:20:00.000Z',
+  },
+  {
+    id: 'pty-cust-002',
+    partyType: 'Customer',
+    name: 'Al-Noor Fine Gems Dubai',
+    contactNumber: '971505558921',
+    address: 'Office 304, Gold Souq Building, Deira',
+    city: 'Dubai',
+    creditLimit: 15000,
+    creditCurrency: 'USD',
+    notes: 'International export partner; settles via USD wire transfer.',
+    createdAt: '2026-10-12T10:30:00.000Z',
+    updatedAt: '2026-11-11T16:45:00.000Z',
+  },
+  {
+    id: 'pty-cust-003',
+    partyType: 'Customer',
+    name: 'Bilal Sons Jewels',
+    contactNumber: '923004419820',
+    address: 'Liberty Market Gulberg III',
+    city: 'Lahore',
+    creditLimit: 600000,
+    creditCurrency: 'PKR',
+    notes: 'Retail & custom ring setting client.',
+    createdAt: '2026-10-20T12:00:00.000Z',
+    updatedAt: '2026-11-08T14:10:00.000Z',
+  },
+  {
+    id: 'pty-vend-001',
+    partyType: 'Vendor',
+    name: 'Shenzhen Precious Stones Co.',
+    contactNumber: '+86 138 0013 8000',
+    address: 'Block B, Shuibei International Jewelry Center, Luohu',
+    city: 'Shenzhen',
+    creditLimit: 60000,
+    creditCurrency: 'RMB',
+    notes: 'Primary supplier for calibrated emeralds & tourmalines.',
+    createdAt: '2026-10-03T08:00:00.000Z',
+    updatedAt: '2026-11-02T10:00:00.000Z',
+  },
+  {
+    id: 'pty-vend-002',
+    partyType: 'Vendor',
+    name: 'Guangzhou Jade & Gem Trading',
+    contactNumber: '+86 139 2245 7710',
+    address: 'Hualin Jade & Gem Market, Liwan District',
+    city: 'Guangzhou',
+    creditLimit: 10000,
+    creditCurrency: 'USD',
+    notes: 'High-grade Burma ruby & 18K mounts supplier.',
+    createdAt: '2026-10-08T09:15:00.000Z',
+    updatedAt: '2026-11-05T13:30:00.000Z',
+  },
+  {
+    id: 'pty-vend-003',
+    partyType: 'Both',
+    name: 'Mingora Mines Syndicate',
+    contactNumber: '923459001122',
+    address: 'Gulkada Gemstone Market, GT Road',
+    city: 'Mingora (Swat)',
+    creditLimit: 800000,
+    creditCurrency: 'PKR',
+    notes: 'Supplies Swat rough & cut emerald parcels; also buys mountings.',
+    createdAt: '2026-10-15T11:00:00.000Z',
+    updatedAt: '2026-11-04T12:00:00.000Z',
   },
 ];

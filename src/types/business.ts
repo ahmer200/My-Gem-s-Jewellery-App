@@ -1,4 +1,4 @@
-export type CurrencyCode = 'RMB' | 'USD' | 'PKR';
+export type CurrencyCode = string;
 
 export type UserRole = 'admin' | 'staff';
 
@@ -23,8 +23,10 @@ export interface CompanyProfile {
   whatsapp: string;
   email: string;
   ntn: string;
-  rmbToPkr: number;
-  usdToPkr: number;
+  defaultCurrency: CurrencyCode;
+  currencyRates: Record<string, number>;
+  rmbToPkr?: number;
+  usdToPkr?: number;
   defaultMarkupPercent: number;
   invoiceFooter: string;
   logoDataUrl: string;
@@ -50,10 +52,12 @@ export interface InventoryItem {
   vaultLocation: string; // 16. Box / Vault
   supplierName: string; // 17. Supplier
   costCurrency: CurrencyCode; // 18. Cost Currency
+  costExchangeRate?: number; // Saved/custom rate -> PKR (0 = keep in costCurrency)
   unitCost: number; // 19. Unit Cost (Orig.)
   sellCurrency: CurrencyCode; // 20. Sell Currency
+  sellExchangeRate?: number; // Saved/custom rate -> PKR (0 = keep in sellCurrency)
   baseSellPrice: number; // 21. Base Sell Price (Orig.)
-  // 22. Final PKR (w/ Markup) is computed dynamically via saved/item rates
+  // 22. Final Selling Price (w/ Markup, in PKR if rate > 0, or original currency if rate = 0)
   imageUrl?: string;
   notes?: string;
   createdAt: string;
@@ -107,8 +111,8 @@ export interface SalesOrder {
   customerAddress: string;
   orderDate: string;
   sourceCurrency: CurrencyCode;
-  rmbRateUsed: number;
-  usdRateUsed: number;
+  rmbRateUsed?: number;
+  usdRateUsed?: number;
   markupPercentUsed: number;
   finalCurrency: CurrencyCode;
   exchangeRateApplied: number;
@@ -121,6 +125,10 @@ export interface SalesOrder {
   profitPkr: number;
   paidAmountPkr: number;
   paymentStatus: 'Paid' | 'Partial' | 'Pending';
+  courierCharges?: number;
+  dispatchStatus?: 'Pending' | 'Dispatched';
+  expectedArrivalDate?: string;
+  dispatchedAt?: string;
   items: SalesLineItem[];
   notes?: string;
   createdBy: string;
@@ -200,11 +208,29 @@ export interface StaffAccount {
   createdAt: string;
 }
 
+export type PartyType = 'Customer' | 'Vendor' | 'Both';
+
+export interface PartyAccount {
+  id: string;
+  partyType: PartyType;
+  name: string;
+  contactNumber: string;
+  address: string;
+  city: string;
+  creditLimit: number;
+  creditCurrency: CurrencyCode;
+  creditExchangeRate?: number;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type ModuleId =
   | 'dashboard'
   | 'inventory'
   | 'purchases'
   | 'sales'
+  | 'parties'
   | 'scanner'
   | 'returns'
   | 'payments'
@@ -212,3 +238,22 @@ export type ModuleId =
   | 'reports'
   | 'users'
   | 'settings';
+
+export interface AqsaAndroidBridgeApi {
+  printCurrentPage?: (jobTitle: string) => void;
+  isNativeAndroid?: () => boolean;
+  getLiveAppUrl?: () => string;
+  setLiveAppUrl?: (url: string) => void;
+  isLiveSyncEnabled?: () => boolean;
+  setLiveSyncEnabled?: (enabled: boolean) => void;
+  reloadApp?: () => void;
+}
+
+declare global {
+  const __APP_BUILD_ID__: string;
+  const __APP_BUILT_AT__: string;
+
+  interface Window {
+    AqsaAndroidBridge?: AqsaAndroidBridgeApi;
+  }
+}

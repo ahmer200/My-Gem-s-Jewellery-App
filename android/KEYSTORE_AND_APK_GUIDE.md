@@ -5,6 +5,18 @@
 
 ---
 
+## 0. Automatic Updates Across All Installed APKs & Web App
+
+1. **Real-Time Business Data Sync (Firestore `onSnapshot`)**:
+   Every device (Android APKs + Web Browsers) signed into the same Google account automatically streams live changes to invoices, dispatch status, inventory, payments, rates, and customers/vendors in ~1 second. Offline edits sync automatically when reconnected.
+2. **Automatic UI & Feature Updates (Live OTA Mode)**:
+   `MainActivity.kt` checks `live_app_url/version.json` on launch.
+   - Set `<string name="live_app_url">` in `android/app/src/main/res/values/strings.xml` (or update it inside **Setup -> Cloud Sync & Backup -> Android Live Web Update Mode**) to your live web deployment URL (such as Firebase Hosting `https://fourth-xyston-lfx4d.web.app` or a public Shared App URL).
+   - Whenever you publish an updated web build (`npm run build`), every installed APK automatically loads the new web version without needing to rebuild or reinstall the APK.
+   - When offline or unreachable, the APK seamlessly loads its bundled `assets/www/index.html` fallback.
+
+---
+
 ## 1. Prerequisites
 - **Node.js 20+** and **npm**
 - **Android Studio (Ladybug / 2024+)** or **Android SDK Command-Line Tools** (`compileSdk 35`, `JDK 17`)
@@ -13,16 +25,10 @@
 
 ## 2. Step-by-Step Build Instructions (Web Bundle -> Android Assets)
 
-1. Install web dependencies and build the production bundle:
+1. Install dependencies, build the production bundle, and sync Android offline fallback assets in one command:
    ```bash
    npm install
-   npm run build
-   ```
-2. Copy the built `dist/` files into the Android native `assets/www/` folder:
-   ```bash
-   mkdir -p android/app/src/main/assets/www
-   rm -rf android/app/src/main/assets/www/*
-   cp -r dist/* android/app/src/main/assets/www/
+   npm run build:android
    ```
 
 ---

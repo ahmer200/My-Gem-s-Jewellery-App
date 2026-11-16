@@ -4,6 +4,7 @@ import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode, PaymentRecord } from '../types/business';
 import { formatMoney, getRateForCurrency } from '../utils/currency';
 import { DeleteActionButton } from '../components/DeleteActionButton';
+import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
 
 export const PaymentsView: React.FC = () => {
   const {
@@ -34,12 +35,13 @@ export const PaymentsView: React.FC = () => {
 
   const handleCurrencyChange = (cur: CurrencyCode) => {
     setCurrency(cur);
-    setRate(String(getRateForCurrency(cur, profile.rmbToPkr, profile.usdToPkr)));
+    setRate(String(getRateForCurrency(cur, profile)));
   };
 
   const activeRate = currency === 'PKR' ? 1 : Math.max(0, Number(rate) || 0);
   const amountNum = Math.max(0, Number(amountOrig) || 0);
-  const amountPkr = currency === 'PKR' ? amountNum : amountNum * activeRate;
+  const isOriginalCurrencyMode = currency !== 'PKR' && activeRate === 0;
+  const amountPkr = currency === 'PKR' ? amountNum : activeRate > 0 ? amountNum * activeRate : amountNum;
 
   const totals = useMemo(() => {
     const incomingPkr = payments
@@ -105,7 +107,7 @@ export const PaymentsView: React.FC = () => {
           Payments, Cash Flow & Accounts Ledger
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Track incoming/outgoing payments in RMB, USD, and PKR alongside Customer Dues & Supplier Payables
+          Track incoming/outgoing payments in any world currency (Rate = 0 keeps amount in selected currency) alongside Customer Dues & Supplier Payables
         </p>
       </div>
 
@@ -149,7 +151,7 @@ export const PaymentsView: React.FC = () => {
           <div className="flex items-center gap-2 pb-3 border-b border-slate-200 dark:border-slate-800">
             <Wallet className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
             <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
-              Record Incoming / Outgoing Payment (RMB / USD / PKR)
+              Record Incoming / Outgoing Payment (World Currencies)
             </h2>
           </div>
 
@@ -208,28 +210,24 @@ export const PaymentsView: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Currency
               </label>
-              <select
+              <WorldCurrencySelect
                 value={currency}
-                onChange={(e) => handleCurrencyChange(e.target.value as CurrencyCode)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono"
-              >
-                <option value="PKR">PKR</option>
-                <option value="RMB">RMB</option>
-                <option value="USD">USD</option>
-              </select>
+                onChange={handleCurrencyChange}
+              />
             </div>
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Rate → PKR
+                Rate → PKR (0 = Keep in {currency})
               </label>
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 disabled={currency === 'PKR'}
                 value={currency === 'PKR' ? '1' : rate}
                 onChange={(e) => setRate(e.target.value)}
@@ -263,9 +261,9 @@ export const PaymentsView: React.FC = () => {
             </div>
             <button
               type="submit"
-              className="rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 min-h-[40px]"
+              className="rounded-lg bg-emerald-700 px-4 py-2.5 text-xs font-semibold text-white hover:bg-emerald-800 min-h-[40px] whitespace-nowrap shrink-0"
             >
-              Save ({formatMoney(amountPkr, 'PKR')})
+              Save ({formatMoney(isOriginalCurrencyMode ? amountNum : amountPkr, isOriginalCurrencyMode ? currency : 'PKR')})
             </button>
           </div>
         </form>
@@ -292,7 +290,18 @@ export const PaymentsView: React.FC = () => {
                         {sale.customerName}
                       </p>
                       <p className="font-mono text-[11px] text-slate-500">
-                        {sale.invoiceNo} · {sale.orderDate}
+                        {sale.invoiceNo} · {sale.orderDate} ·{' '}
+                        <span
+                          className={
+                            sale.dispatchStatus === 'Dispatched'
+                              ? 'text-emerald-700 dark:text-emerald-400 font-semibold'
+                              : 'text-amber-700 dark:text-amber-400 font-semibold'
+                          }
+                        >
+                          {sale.dispatchStatus === 'Dispatched'
+                            ? `Dispatched (Arrives: ${sale.expectedArrivalDate || '—'})`
+                            : 'Pending Dispatch (Editable)'}
+                        </span>
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
@@ -375,12 +384,14 @@ export const PaymentsView: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Party & Category</th>
                 <th className="py-3 px-4 font-semibold">Method / Ref</th>
                 <th className="py-3 px-4 font-semibold text-right">Original Amount</th>
-                <th className="py-3 px-4 font-semibold text-right">PKR Equivalent</th>
+                <th className="py-3 px-4 font-semibold text-right">Final Amount</th>
                 <th className="py-3 px-4 font-semibold text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-              {payments.map((p) => (
+              {payments.map((p) => {
+                const isOrigMode = p.currency !== 'PKR' && p.exchangeRateApplied === 0;
+                return (
                 <tr key={p.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                   <td className="py-3 px-4 whitespace-nowrap font-semibold">
                     {p.type === 'Incoming' ? (
@@ -404,10 +415,13 @@ export const PaymentsView: React.FC = () => {
                     {p.method} · <span className="font-mono">{p.referenceNo}</span>
                   </td>
                   <td className="py-3 px-4 text-right font-mono whitespace-nowrap">
-                    {formatMoney(p.amountOrig, p.currency)} (@{p.exchangeRateApplied})
+                    {formatMoney(p.amountOrig, p.currency)}{' '}
+                    <span className="text-slate-500">
+                      ({isOrigMode ? 'Rate: 0 · Orig' : `@${p.exchangeRateApplied}`})
+                    </span>
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
-                    {formatMoney(p.amountPkr, 'PKR')}
+                    {isOrigMode ? formatMoney(p.amountOrig, p.currency) : formatMoney(p.amountPkr, 'PKR')}
                   </td>
                   <td className="py-3 px-4 text-right whitespace-nowrap">
                     {canManage && (
@@ -418,7 +432,8 @@ export const PaymentsView: React.FC = () => {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

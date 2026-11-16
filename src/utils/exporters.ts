@@ -16,9 +16,22 @@ import {
 
 export function buildInventoryRows(items: InventoryItem[], profile: CompanyProfile) {
   return items.map((item) => {
-    const costRate = getRateForCurrency(item.costCurrency, profile.rmbToPkr, profile.usdToPkr);
-    const costPkr = convertToPkr(item.unitCost, item.costCurrency, profile.rmbToPkr, profile.usdToPkr);
-    const sellCalc = computeItemFinalPkr(item.baseSellPrice, item.sellCurrency, profile);
+    const costRate =
+      item.costCurrency === 'PKR'
+        ? 1
+        : typeof item.costExchangeRate === 'number'
+          ? item.costExchangeRate
+          : getRateForCurrency(item.costCurrency, profile);
+    const costDisplay =
+      item.costCurrency !== 'PKR' && costRate === 0
+        ? formatMoney(item.unitCost, item.costCurrency)
+        : Number(convertToPkr(item.unitCost, item.costCurrency, costRate).toFixed(2));
+    const sellCalc = computeItemFinalPkr(
+      item.baseSellPrice,
+      item.sellCurrency,
+      profile,
+      item.sellExchangeRate
+    );
     return {
       '1. SKU / Barcode': item.sku,
       '2. Product Name': item.name,
@@ -39,9 +52,9 @@ export function buildInventoryRows(items: InventoryItem[], profile: CompanyProfi
       '17. Supplier': item.supplierName,
       '18. Cost Currency': item.costCurrency,
       '19. Unit Cost (Orig.)': `${item.unitCost.toFixed(2)} ${item.costCurrency} (@${costRate})`,
-      '20. Cost (PKR)': Number(costPkr.toFixed(2)),
+      '20. Cost (Converted)': costDisplay,
       '21. Base Sell Price': `${item.baseSellPrice.toFixed(2)} ${item.sellCurrency}`,
-      '22. Final PKR (w/ Markup)': `${sellCalc.finalPkr.toFixed(2)} PKR (${profile.defaultMarkupPercent}%)`,
+      '22. Final Price (w/ Markup)': `${sellCalc.finalDisplayAmount.toFixed(2)} ${sellCalc.finalCurrency} (${profile.defaultMarkupPercent}%)`,
     };
   });
 }
@@ -72,8 +85,10 @@ export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfi
   doc.setFontSize(14);
   doc.text(`Aqsa Business Management System — ${profile.companyName}`, 14, 14);
   doc.setFontSize(9);
+  const defaultCur = profile.defaultCurrency || 'CNY';
+  const defaultRate = getRateForCurrency(defaultCur, profile);
   doc.text(
-    `22-Column Inventory Report | RMB->PKR: ${profile.rmbToPkr} | USD->PKR: ${profile.usdToPkr} | Markup: ${profile.defaultMarkupPercent}% | Generated: ${new Date().toLocaleDateString()}`,
+    `22-Column Inventory Report | Active FX (${defaultCur}→PKR): ${defaultRate} | Markup: ${profile.defaultMarkupPercent}% | Generated: ${new Date().toLocaleDateString()}`,
     14,
     20
   );
@@ -106,7 +121,7 @@ export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfi
   ];
 
   const body = items.map((i) => {
-    const sellCalc = computeItemFinalPkr(i.baseSellPrice, i.sellCurrency, profile);
+    const sellCalc = computeItemFinalPkr(i.baseSellPrice, i.sellCurrency, profile, i.sellExchangeRate);
     return [
       i.sku,
       i.name,
@@ -129,7 +144,7 @@ export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfi
       `${i.unitCost}`,
       i.sellCurrency,
       `${i.baseSellPrice}`,
-      `${sellCalc.finalPkr.toFixed(0)}`,
+      `${sellCalc.finalDisplayAmount.toFixed(0)} ${sellCalc.finalCurrency}`,
     ];
   });
 
@@ -172,9 +187,16 @@ export function buildInvoicePdfDoc(
   doc.text(`Address: ${order.customerAddress || 'N/A'}`, 14, 61);
   doc.text(`Payment Status: ${order.paymentStatus}`, 150, 51);
   doc.text(`Prepared By: ${order.createdBy}`, 150, 56);
+  doc.text(
+    order.dispatchStatus === 'Dispatched'
+      ? `Dispatch: Dispatched (Arrives: ${order.expectedArrivalDate || 'N/A'})`
+      : 'Dispatch: Pending Dispatch',
+    14,
+    66
+  );
 
   autoTable(doc, {
-    startY: 68,
+    startY: 72,
     head: [
       [
         'SKU',
@@ -210,16 +232,17 @@ export function buildInvoicePdfDoc(
 
   doc.setDrawColor(203, 213, 225);
   doc.setFillColor(248, 250, 252);
-  doc.roundedRect(14, boxY, 182, 46, 2, 2, 'FD');
+  doc.roundedRect(14, boxY, 182, 52, 2, 2, 'FD');
 
   doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
   doc.text('Currency & Percentage Calculation Breakdown', 18, boxY + 7);
   doc.setFontSize(8.5);
+  const isOrigMode = order.sourceCurrency !== 'PKR' && order.exchangeRateApplied === 0;
   doc.text(`Currency Used: ${order.sourceCurrency}`, 18, boxY + 14);
   doc.text(
-    order.rmbRateUsed === 0
-      ? `Exchange Rate Applied: RMB Rate = 0 (Original Currency Mode — ${order.finalCurrency})`
+    isOrigMode
+      ? `Exchange Rate Applied: Rate = 0 (Original Currency Mode — ${order.finalCurrency})`
       : `Exchange Rate Applied: 1 ${order.sourceCurrency} = ${order.exchangeRateApplied.toFixed(2)} PKR`,
     18,
     boxY + 20
@@ -227,19 +250,31 @@ export function buildInvoicePdfDoc(
   doc.text(`Percentage Markup Applied: ${order.markupPercentUsed}%`, 18, boxY + 26);
   doc.text(`Base Amount: ${formatMoney(order.baseSubtotal, order.sourceCurrency)}`, 18, boxY + 32);
   doc.text(
-    `Converted Amount: ${order.rmbRateUsed === 0 && order.sourceCurrency !== 'PKR' ? `Original Currency (${order.finalCurrency})` : formatMoney(order.convertedAmountPkr, 'PKR')}`,
+    `Converted Amount: ${isOrigMode ? `Original Currency (${order.finalCurrency})` : formatMoney(order.convertedAmountPkr, 'PKR')}`,
     18,
     boxY + 38
   );
 
+  doc.setFontSize(8.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `Markup (${order.markupPercentUsed}%): + ${formatMoney(order.markupAmount, order.finalCurrency)}`,
+    120,
+    boxY + 14
+  );
+  doc.text(
+    `Courier Charges: + ${formatMoney(order.courierCharges || 0, order.finalCurrency)}`,
+    120,
+    boxY + 20
+  );
   doc.setFontSize(12);
   doc.setTextColor(6, 78, 59);
-  doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 122, boxY + 26);
+  doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 120, boxY + 30);
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, 'PKR')}`, 122, boxY + 34);
+  doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, 'PKR')}`, 120, boxY + 38);
   const duePkr = Math.max(0, order.finalTotalPkrEquivalent - order.paidAmountPkr);
-  doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, 'PKR')}`, 122, boxY + 40);
+  doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, 'PKR')}`, 120, boxY + 45);
 
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
@@ -300,8 +335,10 @@ export function exportGenericReportPdf(
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
   doc.text(subtitle, 14, 20);
+  const defaultCur = profile.defaultCurrency || 'CNY';
+  const defaultRate = getRateForCurrency(defaultCur, profile);
   doc.text(
-    `Saved FX: RMB->PKR ${profile.rmbToPkr} | USD->PKR ${profile.usdToPkr} | Default Markup: ${profile.defaultMarkupPercent}% | Aqsa Business Management System`,
+    `Active FX: ${defaultCur}→PKR ${defaultRate} | Default Markup: ${profile.defaultMarkupPercent}% | Aqsa Business Management System`,
     14,
     25
   );

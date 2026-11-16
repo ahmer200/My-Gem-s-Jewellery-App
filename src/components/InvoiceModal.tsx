@@ -1,37 +1,42 @@
 import React, { useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import { Eye, FileDown, MessageCircle, Printer, X } from 'lucide-react';
+import { Edit3, Eye, FileDown, Lock, MessageCircle, Printer, Truck, X } from 'lucide-react';
 import { SalesOrder } from '../types/business';
 import { useBusiness } from '../context/BusinessContext';
 import { formatMoney, getLineItemAmounts } from '../utils/currency';
 import { exportInvoicePdf, getInvoicePdfPreviewUrl } from '../utils/exporters';
+import { DispatchConfirmModal } from './DispatchConfirmModal';
 
 interface InvoiceModalProps {
   order: SalesOrder;
   onClose: () => void;
 }
 
-declare global {
-  interface Window {
-    AqsaAndroidBridge?: {
-      printCurrentPage?: (jobTitle: string) => void;
-    };
-  }
-}
-
 export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) => {
-  const { profile, notify } = useBusiness();
+  const {
+    profile,
+    sales,
+    dispatchSale,
+    openSaleForEdit,
+    hasPermission,
+    notify,
+  } = useBusiness();
+  const currentOrder = sales.find((s) => s.id === order.id) || order;
+  const isDispatched = currentOrder.dispatchStatus === 'Dispatched';
+  const canEditSales = hasPermission('create_sales');
+
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [viewMode, setViewMode] = useState<'sheet' | 'pdfPreview'>('sheet');
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
+  const [showDispatchModal, setShowDispatchModal] = useState(false);
   const sheetRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const verifyPayload = `${profile.companyName} | ${order.invoiceNo} | ${order.orderDate} | Total: ${formatMoney(order.finalTotal, order.finalCurrency)}`;
+    const verifyPayload = `${profile.companyName} | ${currentOrder.invoiceNo} | ${currentOrder.orderDate} | Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}`;
     QRCode.toDataURL(verifyPayload, { width: 120, margin: 1 })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''));
-  }, [order, profile.companyName]);
+  }, [currentOrder, profile.companyName]);
 
   useEffect(() => {
     return () => {
@@ -41,12 +46,17 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
     };
   }, [pdfPreviewUrl]);
 
-  const duePkr = Math.max(0, order.finalTotalPkrEquivalent - order.paidAmountPkr);
+  const duePkr = Math.max(0, currentOrder.finalTotalPkrEquivalent - currentOrder.paidAmountPkr);
 
   const shareWhatsApp = () => {
-    const cleanPhone = (order.customerPhone || '').replace(/[^\d]/g, '');
+    const cleanPhone = (currentOrder.customerPhone || '').replace(/[^\d]/g, '');
+    const dispatchLine = isDispatched
+      ? `\nDispatch: Dispatched (Expected Arrival: ${currentOrder.expectedArrivalDate || 'N/A'})`
+      : '\nDispatch: Pending Dispatch';
+    const isOrigMode =
+      currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0;
     const msg = encodeURIComponent(
-      `Assalam-o-Alaikum ${order.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${order.invoiceNo}\nDate: ${order.orderDate}\nCurrency Used: ${order.sourceCurrency}\nExchange Rate Applied: ${order.rmbRateUsed === 0 ? 'RMB=0 (Original Currency Mode)' : `1 ${order.sourceCurrency} = ${order.exchangeRateApplied} PKR`}\nMarkup Applied: ${order.markupPercentUsed}%\n*Final Total: ${formatMoney(order.finalTotal, order.finalCurrency)}*\nStatus: ${order.paymentStatus}\n\nThank you for your business!`
+      `Assalam-o-Alaikum ${currentOrder.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${currentOrder.invoiceNo}\nDate: ${currentOrder.orderDate}\nCurrency Used: ${currentOrder.sourceCurrency}\nExchange Rate Applied: ${isOrigMode ? `Rate = 0 (Original ${currentOrder.finalCurrency} Mode)` : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied} PKR`}\nMarkup Applied: ${currentOrder.markupPercentUsed}%\nCourier Charges: ${formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}\n*Final Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}*\nStatus: ${currentOrder.paymentStatus}${dispatchLine}\n\nThank you for your business!`
     );
     window.open(cleanPhone ? `https://wa.me/${cleanPhone}?text=${msg}` : `https://wa.me/?text=${msg}`, '_blank');
   };
@@ -55,7 +65,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
     if (pdfPreviewUrl) {
       URL.revokeObjectURL(pdfPreviewUrl);
     }
-    const url = getInvoicePdfPreviewUrl(order, profile, autoPrintFlag);
+    const url = getInvoicePdfPreviewUrl(currentOrder, profile, autoPrintFlag);
     setPdfPreviewUrl(url);
     setViewMode('pdfPreview');
   };
@@ -83,7 +93,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
         .join('\n');
 
       doc.open();
-      doc.write(`<!doctype html><html><head><title>${order.invoiceNo} - ${profile.companyName}</title>${styles}<style>@page{margin:12mm;size:A4 portrait;}body{background:#fff !important;color:#0f172a !important;padding:0;margin:0;}</style></head><body>${sheetRef.current.outerHTML}</body></html>`);
+      doc.write(`<!doctype html><html><head><title>${currentOrder.invoiceNo} - ${profile.companyName}</title>${styles}<style>@page{margin:12mm;size:A4 portrait;}body{background:#fff !important;color:#0f172a !important;padding:0;margin:0;}</style></head><body>${sheetRef.current.outerHTML}</body></html>`);
       doc.close();
 
       setTimeout(() => {
@@ -109,7 +119,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
   const handlePrintInvoice = () => {
     // 1. Native Android APK PrintManager bridge
     if (window.AqsaAndroidBridge?.printCurrentPage) {
-      window.AqsaAndroidBridge.printCurrentPage(`${order.invoiceNo}_${profile.companyName}`);
+      window.AqsaAndroidBridge.printCurrentPage(`${currentOrder.invoiceNo}_${profile.companyName}`);
       return;
     }
 
@@ -136,9 +146,38 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             <span className="font-display text-sm font-semibold text-slate-900 dark:text-white">
               {viewMode === 'pdfPreview' ? 'A4 Print Preview (PDF)' : 'Official Invoice Preview'}
             </span>
-            <span className="text-xs text-slate-500 font-mono">{order.invoiceNo}</span>
+            <span className="text-xs text-slate-500 font-mono">{currentOrder.invoiceNo}</span>
+            {isDispatched && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                <Lock className="w-3 h-3" />
+                Locked
+              </span>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canEditSales && !isDispatched && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    openSaleForEdit(currentOrder.id);
+                    onClose();
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[38px]"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Edit Invoice
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDispatchModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-700 text-xs font-semibold text-white hover:bg-emerald-800 whitespace-nowrap shrink-0 min-h-[38px]"
+                >
+                  <Truck className="w-3.5 h-3.5" />
+                  Dispatch
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() =>
@@ -159,7 +198,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             </button>
             <button
               type="button"
-              onClick={() => exportInvoicePdf(order, profile)}
+              onClick={() => exportInvoicePdf(currentOrder, profile)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[38px]"
             >
               <FileDown className="w-3.5 h-3.5" />
@@ -207,7 +246,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             </div>
             <iframe
               src={pdfPreviewUrl}
-              title={`Print preview for ${order.invoiceNo}`}
+              title={`Print preview for ${currentOrder.invoiceNo}`}
               className="w-full h-[70vh] rounded-lg border border-slate-300 dark:border-slate-800 bg-white"
             />
           </div>
@@ -246,10 +285,16 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             <div className="flex sm:flex-col items-end justify-between gap-2 text-right">
               <div>
                 <p className="text-xs font-semibold text-slate-500">TAX / TRADE INVOICE</p>
-                <p className="font-mono text-lg font-bold text-slate-900">{order.invoiceNo}</p>
-                <p className="text-xs text-slate-600">Date: {order.orderDate}</p>
+                <p className="font-mono text-lg font-bold text-slate-900">{currentOrder.invoiceNo}</p>
+                <p className="text-xs text-slate-600">Date: {currentOrder.orderDate}</p>
                 <p className="text-xs font-semibold text-emerald-800 mt-0.5">
-                  Status: {order.paymentStatus}
+                  Payment: {currentOrder.paymentStatus}
+                </p>
+                <p className="text-xs font-semibold text-slate-700 mt-0.5">
+                  Dispatch:{' '}
+                  {isDispatched
+                    ? `Dispatched (Arrives: ${currentOrder.expectedArrivalDate || '—'})`
+                    : 'Pending Dispatch (Editable)'}
                 </p>
               </div>
               {qrDataUrl && (
@@ -262,17 +307,22 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-50 p-4 rounded-lg border border-slate-200">
             <div>
               <p className="font-semibold text-slate-500">BILL TO CUSTOMER</p>
-              <p className="text-sm font-bold text-slate-900 mt-1">{order.customerName}</p>
-              <p className="text-slate-600">Phone: {order.customerPhone || '—'}</p>
-              <p className="text-slate-600">Address: {order.customerAddress || '—'}</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">{currentOrder.customerName}</p>
+              <p className="text-slate-600">Phone: {currentOrder.customerPhone || '—'}</p>
+              <p className="text-slate-600">Address: {currentOrder.customerAddress || '—'}</p>
             </div>
             <div className="sm:text-right">
-              <p className="font-semibold text-slate-500">SYSTEM & OPERATOR</p>
+              <p className="font-semibold text-slate-500">SYSTEM & DISPATCH</p>
               <p className="text-slate-800 font-medium mt-1">Aqsa Business Management System</p>
-              <p className="text-slate-600">Prepared by: {order.createdBy}</p>
+              <p className="text-slate-600">Prepared by: {currentOrder.createdBy}</p>
               <p className="text-slate-600">
-                Bill Currency: <strong className="text-slate-900">{order.finalCurrency}</strong>
+                Bill Currency: <strong className="text-slate-900">{currentOrder.finalCurrency}</strong>
               </p>
+              {isDispatched && currentOrder.expectedArrivalDate && (
+                <p className="text-emerald-800 font-medium">
+                  Parcel Arrival Date: <span className="font-mono">{currentOrder.expectedArrivalDate}</span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -286,19 +336,19 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
                   <th className="py-2.5 pr-3 font-semibold">Cert #</th>
                   <th className="py-2.5 pr-3 font-semibold text-right">Qty</th>
                   <th className="py-2.5 pr-3 font-semibold text-right">
-                    Unit ({order.sourceCurrency})
+                    Unit ({currentOrder.sourceCurrency})
                   </th>
                   <th className="py-2.5 pr-3 font-semibold text-right">Item %</th>
                   <th className="py-2.5 font-semibold text-right">
-                    Total w/ % ({order.sourceCurrency})
+                    Total w/ % ({currentOrder.sourceCurrency})
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {order.items.map((item, idx) => {
+                {currentOrder.items.map((item, idx) => {
                   const { percentUsed, lineBaseOrig, lineTotalOrig } = getLineItemAmounts(
                     item,
-                    order.markupPercentUsed
+                    currentOrder.markupPercentUsed
                   );
                   return (
                     <tr key={`${item.inventoryId}-${idx}`}>
@@ -314,17 +364,17 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
                       </td>
                       <td className="py-2.5 pr-3 text-right font-mono">{item.quantity}</td>
                       <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
-                        {formatMoney(item.unitPriceOrig, order.sourceCurrency)}
+                        {formatMoney(item.unitPriceOrig, currentOrder.sourceCurrency)}
                       </td>
                       <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap text-emerald-800 font-semibold">
                         +{percentUsed}%
                       </td>
                       <td className="py-2.5 text-right font-mono whitespace-nowrap">
                         <p className="font-semibold text-slate-900">
-                          {formatMoney(lineTotalOrig, order.sourceCurrency)}
+                          {formatMoney(lineTotalOrig, currentOrder.sourceCurrency)}
                         </p>
                         <p className="text-[10px] text-slate-500">
-                          Base: {formatMoney(lineBaseOrig, order.sourceCurrency)}
+                          Base: {formatMoney(lineBaseOrig, currentOrder.sourceCurrency)}
                         </p>
                       </td>
                     </tr>
@@ -342,30 +392,32 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
               </p>
               <div className="flex justify-between">
                 <span className="text-slate-600">Currency Used for Entry:</span>
-                <span className="font-mono font-semibold">{order.sourceCurrency}</span>
+                <span className="font-mono font-semibold">{currentOrder.sourceCurrency}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Exchange Rate Applied:</span>
                 <span className="font-mono font-semibold">
-                  {order.rmbRateUsed === 0 && order.sourceCurrency !== 'PKR'
-                    ? `RMB = 0 (Original ${order.finalCurrency})`
-                    : `1 ${order.sourceCurrency} = ${order.exchangeRateApplied.toFixed(2)} PKR`}
+                  {currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0
+                    ? `Rate = 0 (Original ${currentOrder.finalCurrency})`
+                    : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied.toFixed(2)} PKR`}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Percentage Markup Used:</span>
-                <span className="font-mono font-semibold">{order.markupPercentUsed}%</span>
+                <span className="font-mono font-semibold">{currentOrder.markupPercentUsed}%</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Base Subtotal:</span>
-                <span className="font-mono">{formatMoney(order.baseSubtotal, order.sourceCurrency)}</span>
+                <span className="font-mono">
+                  {formatMoney(currentOrder.baseSubtotal, currentOrder.sourceCurrency)}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-600">Converted Amount:</span>
                 <span className="font-mono">
-                  {order.rmbRateUsed === 0 && order.sourceCurrency !== 'PKR'
-                    ? `No PKR Conversion (${order.finalCurrency})`
-                    : formatMoney(order.convertedAmountPkr, 'PKR')}
+                  {currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0
+                    ? `No PKR Conversion (${currentOrder.finalCurrency})`
+                    : formatMoney(currentOrder.convertedAmountPkr, 'PKR')}
                 </span>
               </div>
             </div>
@@ -374,15 +426,21 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
               <div className="space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-slate-600">
-                    Markup ({order.markupPercentUsed}%):
+                    Markup ({currentOrder.markupPercentUsed}%):
                   </span>
                   <span className="font-mono">
-                    + {formatMoney(order.markupAmount, order.finalCurrency)}
+                    + {formatMoney(currentOrder.markupAmount, currentOrder.finalCurrency)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-600">Courier Charges:</span>
+                  <span className="font-mono font-semibold text-slate-900">
+                    + {formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}
                   </span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-600">Paid (PKR Equivalent):</span>
-                  <span className="font-mono">{formatMoney(order.paidAmountPkr, 'PKR')}</span>
+                  <span className="font-mono">{formatMoney(currentOrder.paidAmountPkr, 'PKR')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-600">Balance Due (PKR Equivalent):</span>
@@ -395,14 +453,14 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
               <div className="pt-2 border-t border-emerald-200 flex items-baseline justify-between">
                 <span className="text-sm font-bold text-emerald-950">FINAL BILL TOTAL</span>
                 <span className="font-mono text-xl font-extrabold text-emerald-800">
-                  {formatMoney(order.finalTotal, order.finalCurrency)}
+                  {formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}
                 </span>
               </div>
             </div>
           </div>
 
-          {order.notes && (
-            <p className="text-xs text-slate-600 italic">Note: {order.notes}</p>
+          {currentOrder.notes && (
+            <p className="text-xs text-slate-600 italic">Note: {currentOrder.notes}</p>
           )}
 
           <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500">
@@ -411,6 +469,17 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
           </div>
         </div>
       </div>
+
+      {showDispatchModal && (
+        <DispatchConfirmModal
+          order={currentOrder}
+          onClose={() => setShowDispatchModal(false)}
+          onConfirm={(arrivalDate) => {
+            dispatchSale(currentOrder.id, arrivalDate);
+            setShowDispatchModal(false);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import { FileDown, FileSpreadsheet } from 'lucide-react';
+import { Edit3, FileDown, FileSpreadsheet, Lock, Printer, Truck } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
+import { SalesOrder } from '../types/business';
 import {
   computeItemFinalPkr,
   convertToPkr,
@@ -11,17 +12,32 @@ import {
   exportGenericReportExcel,
   exportGenericReportPdf,
 } from '../utils/exporters';
+import { computeItemVelocity } from '../utils/velocity';
+import { ItemVelocityChart } from '../components/ItemVelocityChart';
+import { DispatchConfirmModal } from '../components/DispatchConfirmModal';
+import { InvoiceModal } from '../components/InvoiceModal';
 
-type ReportTab = 'stock' | 'sales' | 'profit' | 'purchase' | 'customer';
+type ReportTab = 'stock' | 'sales' | 'velocity' | 'profit' | 'purchase' | 'customer';
 
 export const ReportsView: React.FC = () => {
-  const { inventory, sales, purchases, profile, hasPermission } = useBusiness();
+  const {
+    inventory,
+    sales,
+    purchases,
+    profile,
+    dispatchSale,
+    openSaleForEdit,
+    hasPermission,
+  } = useBusiness();
   const [activeTab, setActiveTab] = useState<ReportTab>('stock');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [dispatchTarget, setDispatchTarget] = useState<SalesOrder | null>(null);
+  const [previewOrder, setPreviewOrder] = useState<SalesOrder | null>(null);
 
   const canExport = hasPermission('export_reports');
   const canViewProfit = hasPermission('view_profit');
+  const canEditSales = hasPermission('create_sales');
 
   const filteredSales = useMemo(() => {
     return sales.filter((s) => {
@@ -41,6 +57,9 @@ export const ReportsView: React.FC = () => {
 
   // Report datasets (All include Currency Type, Exchange Rate, and Percentage Used)
   const reportConfig = useMemo(() => {
+    const defCur = profile.defaultCurrency || 'CNY';
+    const defRate = getRateForCurrency(defCur, profile);
+
     if (activeTab === 'stock') {
       const headers = [
         'SKU',
@@ -52,31 +71,39 @@ export const ReportsView: React.FC = () => {
         'Sell Rate',
         'Markup %',
         'Base Sell Price',
-        'Final Retail Value (PKR)',
+        'Final Retail Value',
       ];
       const rows = inventory.map((item) => {
-        const costRate = getRateForCurrency(
-          item.costCurrency,
-          profile.rmbToPkr,
-          profile.usdToPkr
+        const costRate =
+          item.costCurrency === 'PKR'
+            ? 1
+            : typeof item.costExchangeRate === 'number'
+              ? item.costExchangeRate
+              : getRateForCurrency(item.costCurrency, profile);
+        const sellCalc = computeItemFinalPkr(
+          item.baseSellPrice,
+          item.sellCurrency,
+          profile,
+          item.sellExchangeRate
         );
-        const sellCalc = computeItemFinalPkr(item.baseSellPrice, item.sellCurrency, profile);
         return [
           item.sku,
           item.name,
           item.stockQty,
           item.costCurrency,
-          costRate,
+          item.costCurrency !== 'PKR' && costRate === 0 ? `0 (${item.costCurrency})` : costRate,
           item.sellCurrency,
-          sellCalc.rate,
+          item.sellCurrency !== 'PKR' && sellCalc.rate === 0
+            ? `0 (${item.sellCurrency})`
+            : sellCalc.rate,
           `${profile.defaultMarkupPercent}%`,
           formatMoney(item.baseSellPrice, item.sellCurrency),
-          formatMoney(sellCalc.finalPkr * item.stockQty, 'PKR'),
+          formatMoney(sellCalc.finalDisplayAmount * item.stockQty, sellCalc.finalCurrency),
         ];
       });
       return {
         title: 'Stock Valuation Report',
-        subtitle: `Total SKUs: ${inventory.length} | Active Rates: RMB=${profile.rmbToPkr}, USD=${profile.usdToPkr}, Markup=${profile.defaultMarkupPercent}%`,
+        subtitle: `Total SKUs: ${inventory.length} | Default Currency: ${defCur}=${defRate} PKR, Markup=${profile.defaultMarkupPercent}%`,
         headers,
         rows,
       };
@@ -90,26 +117,35 @@ export const ReportsView: React.FC = () => {
         'Entry Currency',
         'Exchange Rate',
         'Markup %',
+        'Courier Charges',
         'Final Currency',
         'Final Total',
         'PKR Equivalent',
-        'Status',
+        'Payment Status',
+        'Dispatch / Arrival',
       ];
-      const rows = filteredSales.map((s) => [
-        s.invoiceNo,
-        s.orderDate,
-        s.customerName,
-        s.sourceCurrency,
-        s.rmbRateUsed === 0 ? '0 (Orig. Mode)' : s.exchangeRateApplied,
-        `${s.markupPercentUsed}%`,
-        s.finalCurrency,
-        formatMoney(s.finalTotal, s.finalCurrency),
-        formatMoney(s.finalTotalPkrEquivalent, 'PKR'),
-        s.paymentStatus,
-      ]);
+      const rows = filteredSales.map((s) => {
+        const isOrigMode = s.sourceCurrency !== 'PKR' && s.exchangeRateApplied === 0;
+        return [
+          s.invoiceNo,
+          s.orderDate,
+          s.customerName,
+          s.sourceCurrency,
+          isOrigMode ? `0 (Kept in ${s.finalCurrency})` : s.exchangeRateApplied,
+          `${s.markupPercentUsed}%`,
+          formatMoney(s.courierCharges || 0, s.finalCurrency),
+          s.finalCurrency,
+          formatMoney(s.finalTotal, s.finalCurrency),
+          isOrigMode ? formatMoney(s.finalTotal, s.finalCurrency) : formatMoney(s.finalTotalPkrEquivalent, 'PKR'),
+          s.paymentStatus,
+          s.dispatchStatus === 'Dispatched'
+            ? `Dispatched (${s.expectedArrivalDate || '—'})`
+            : 'Pending Dispatch',
+        ];
+      });
       return {
         title: 'Sales Report',
-        subtitle: `Invoices: ${filteredSales.length} | Shows currency, applied exchange rate & markup percentage`,
+        subtitle: `Invoices: ${filteredSales.length} | Shows currency, exchange rate, markup %, courier charges & dispatch status`,
         headers,
         rows,
       };
@@ -129,6 +165,7 @@ export const ReportsView: React.FC = () => {
         'Margin %',
       ];
       const rows = filteredSales.map((s) => {
+        const isOrigMode = s.sourceCurrency !== 'PKR' && s.exchangeRateApplied === 0;
         const margin =
           s.finalTotalPkrEquivalent > 0
             ? ((s.profitPkr / s.finalTotalPkrEquivalent) * 100).toFixed(1)
@@ -138,7 +175,7 @@ export const ReportsView: React.FC = () => {
           s.orderDate,
           s.customerName,
           `${s.sourceCurrency} -> ${s.finalCurrency}`,
-          s.rmbRateUsed === 0 ? '0 (Orig)' : s.exchangeRateApplied,
+          isOrigMode ? `0 (${s.finalCurrency})` : s.exchangeRateApplied,
           `${s.markupPercentUsed}%`,
           formatMoney(s.finalTotalPkrEquivalent, 'PKR'),
           formatMoney(s.totalCostPkr, 'PKR'),
@@ -193,6 +230,45 @@ export const ReportsView: React.FC = () => {
       };
     }
 
+    if (activeTab === 'velocity') {
+      const velocityRows = computeItemVelocity(inventory, filteredSales, profile).sort((a, b) => {
+        if (b.unitsSold !== a.unitsSold) return b.unitsSold - a.unitsSold;
+        return b.sellThroughPct - a.sellThroughPct;
+      });
+      const headers = [
+        'SKU',
+        'Product Name',
+        'Category',
+        'Velocity Status',
+        'Units Sold',
+        'Stock Qty',
+        'Sell-Through %',
+        'Currency Rate Ref',
+        'Sales Revenue (PKR)',
+        'Stock Retail Value (PKR)',
+        'Last Sold Date',
+      ];
+      const rows = velocityRows.map((v) => [
+        v.sku,
+        v.name,
+        v.category,
+        v.classification,
+        v.unitsSold,
+        v.stockQty,
+        `${v.sellThroughPct}%`,
+        `${defCur}=${defRate} PKR (+${profile.defaultMarkupPercent}%)`,
+        formatMoney(v.revenuePkr, 'PKR'),
+        formatMoney(v.stockValuePkr, 'PKR'),
+        v.lastSoldDate || 'No sales',
+      ]);
+      return {
+        title: 'Fast-Moving & Slow-Moving Item Velocity Report',
+        subtitle: `Tracked SKUs: ${velocityRows.length} | Fast-Moving vs Idle Stock Breakdown`,
+        headers,
+        rows,
+      };
+    }
+
     // Customer Report
     const customerMap = new Map<
       string,
@@ -200,6 +276,8 @@ export const ReportsView: React.FC = () => {
         name: string;
         phone: string;
         orders: number;
+        pendingDispatch: number;
+        dispatched: number;
         currencies: Set<string>;
         rates: Set<string>;
         markups: Set<string>;
@@ -215,6 +293,8 @@ export const ReportsView: React.FC = () => {
         name: key,
         phone: s.customerPhone || '—',
         orders: 0,
+        pendingDispatch: 0,
+        dispatched: 0,
         currencies: new Set<string>(),
         rates: new Set<string>(),
         markups: new Set<string>(),
@@ -223,6 +303,8 @@ export const ReportsView: React.FC = () => {
         lastDate: s.orderDate,
       };
       existing.orders += 1;
+      if (s.dispatchStatus === 'Dispatched') existing.dispatched += 1;
+      else existing.pendingDispatch += 1;
       existing.currencies.add(s.finalCurrency);
       existing.rates.add(String(s.exchangeRateApplied));
       existing.markups.add(`${s.markupPercentUsed}%`);
@@ -236,6 +318,8 @@ export const ReportsView: React.FC = () => {
       'Customer Name',
       'Contact',
       'Orders',
+      'Pending Dispatch',
+      'Dispatched',
       'Currencies Used',
       'Rates Applied',
       'Markup % Used',
@@ -249,6 +333,8 @@ export const ReportsView: React.FC = () => {
       c.name,
       c.phone,
       c.orders,
+      c.pendingDispatch,
+      c.dispatched,
       Array.from(c.currencies).join(', '),
       Array.from(c.rates).join(', '),
       Array.from(c.markups).join(', '),
@@ -260,17 +346,18 @@ export const ReportsView: React.FC = () => {
 
     return {
       title: 'Customer Ledger Report',
-      subtitle: `Unique Customers: ${rows.length} | Active FX: RMB=${profile.rmbToPkr}, USD=${profile.usdToPkr}`,
+      subtitle: `Unique Customers: ${rows.length} (Includes both Dispatched & Pending Dispatch invoices) | Default FX: ${defCur}=${defRate} PKR`,
       headers,
       rows,
     };
   }, [activeTab, inventory, filteredSales, filteredPurchases, profile]);
 
   const handleExportExcel = () => {
+    const defCur = profile.defaultCurrency || 'CNY';
     exportGenericReportExcel(reportConfig.title, reportConfig.headers, reportConfig.rows, [
       ['Merchant', profile.companyName],
-      ['RMB -> PKR Rate', String(profile.rmbToPkr)],
-      ['USD -> PKR Rate', String(profile.usdToPkr)],
+      ['Default World Currency', defCur],
+      ['Default Rate -> PKR', String(getRateForCurrency(defCur, profile))],
       ['Default Markup %', `${profile.defaultMarkupPercent}%`],
       ['Generated', new Date().toLocaleString()],
     ]);
@@ -286,10 +373,15 @@ export const ReportsView: React.FC = () => {
     );
   };
 
-  const stockCostTotalPkr = inventory.reduce(
-    (s, i) => s + convertToPkr(i.unitCost, i.costCurrency, profile.rmbToPkr, profile.usdToPkr) * i.stockQty,
-    0
-  );
+  const stockCostTotalPkr = inventory.reduce((s, i) => {
+    const costRate =
+      i.costCurrency === 'PKR'
+        ? 1
+        : typeof i.costExchangeRate === 'number'
+          ? i.costExchangeRate
+          : getRateForCurrency(i.costCurrency, profile);
+    return s + convertToPkr(i.unitCost, i.costCurrency, costRate) * i.stockQty;
+  }, 0);
 
   return (
     <div className="space-y-6">
@@ -330,6 +422,7 @@ export const ReportsView: React.FC = () => {
             [
               { id: 'stock', label: 'Stock Report' },
               { id: 'sales', label: 'Sales Report' },
+              { id: 'velocity', label: 'Fast / Slow Chart' },
               ...(canViewProfit ? [{ id: 'profit', label: 'Profit Report' }] : []),
               { id: 'purchase', label: 'Purchase Report' },
               { id: 'customer', label: 'Customer Report' },
@@ -366,6 +459,14 @@ export const ReportsView: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* Visual Fast/Slow Moving Item Chart when velocity tab is selected */}
+      {activeTab === 'velocity' && (
+        <ItemVelocityChart
+          salesSource={filteredSales}
+          title="Fast-Moving & Slow-Moving Item Velocity Chart"
+        />
+      )}
 
       {/* Report Data Table */}
       <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -419,6 +520,137 @@ export const ReportsView: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Customer Ledger Invoices & Dispatch Tracker (Editable Before Dispatch) */}
+      {activeTab === 'customer' && (
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                Customer Ledger Invoices & Dispatch Status ({filteredSales.length})
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Un-dispatched invoices appear in customer ledgers and remain editable until dispatched
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="py-3 px-4 font-semibold">Customer</th>
+                  <th className="py-3 px-4 font-semibold">Invoice No</th>
+                  <th className="py-3 px-4 font-semibold">Date</th>
+                  <th className="py-3 px-4 font-semibold text-right">Courier</th>
+                  <th className="py-3 px-4 font-semibold text-right">Final Total</th>
+                  <th className="py-3 px-4 font-semibold text-right">Due (PKR)</th>
+                  <th className="py-3 px-4 font-semibold">Dispatch / Arrival</th>
+                  <th className="py-3 px-4 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {filteredSales.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-slate-500">
+                      No customer ledger invoices found for this date range.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredSales.map((sale) => {
+                    const isDispatched = sale.dispatchStatus === 'Dispatched';
+                    const duePkr = Math.max(0, sale.finalTotalPkrEquivalent - sale.paidAmountPkr);
+                    return (
+                      <tr key={sale.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                        <td className="py-3 px-4 font-medium text-slate-900 dark:text-white">
+                          {sale.customerName}
+                        </td>
+                        <td className="py-3 px-4 font-mono font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                          {sale.invoiceNo}
+                        </td>
+                        <td className="py-3 px-4 font-mono whitespace-nowrap">{sale.orderDate}</td>
+                        <td className="py-3 px-4 text-right font-mono text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                          {formatMoney(sale.courierCharges || 0, sale.finalCurrency)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono font-bold whitespace-nowrap">
+                          {formatMoney(sale.finalTotal, sale.finalCurrency)}
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-amber-700 dark:text-amber-400 whitespace-nowrap">
+                          {formatMoney(duePkr, 'PKR')}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          {isDispatched ? (
+                            <div className="space-y-0.5">
+                              <span className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-400">
+                                <Lock className="w-3 h-3" />
+                                Dispatched
+                              </span>
+                              <p className="text-[11px] font-mono text-slate-500">
+                                Arrives: {sale.expectedArrivalDate || '—'}
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="font-semibold text-amber-700 dark:text-amber-400">
+                              Pending Dispatch (Editable)
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="inline-flex items-center gap-1">
+                            {canEditSales && !isDispatched && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openSaleForEdit(sale.id)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" />
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDispatchTarget(sale)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-emerald-700 hover:bg-emerald-800 text-xs font-semibold text-white"
+                                >
+                                  <Truck className="w-3.5 h-3.5" />
+                                  Dispatch
+                                </button>
+                              </>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setPreviewOrder(sale)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-medium"
+                            >
+                              <Printer className="w-3.5 h-3.5" />
+                              Invoice
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {previewOrder && (
+        <InvoiceModal order={previewOrder} onClose={() => setPreviewOrder(null)} />
+      )}
+
+      {dispatchTarget && (
+        <DispatchConfirmModal
+          order={dispatchTarget}
+          onClose={() => setDispatchTarget(null)}
+          onConfirm={(arrivalDate) => {
+            dispatchSale(dispatchTarget.id, arrivalDate);
+            setDispatchTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 };

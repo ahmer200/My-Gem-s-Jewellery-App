@@ -15,7 +15,9 @@ import {
   computeItemFinalPkr,
   convertToPkr,
   formatMoney,
+  getRateForCurrency,
 } from '../utils/currency';
+import { normalizeCurrencyCode } from '../utils/worldCurrencies';
 import {
   exportInventoryCsv,
   exportInventoryExcel,
@@ -23,6 +25,7 @@ import {
 } from '../utils/exporters';
 import { QrTagModal } from '../components/QrTagModal';
 import { DeleteActionButton } from '../components/DeleteActionButton';
+import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
 
 const EMPTY_FORM: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'> = {
   sku: '',
@@ -42,9 +45,11 @@ const EMPTY_FORM: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'> = {
   minStockAlert: 1,
   vaultLocation: 'Vault A-01',
   supplierName: '',
-  costCurrency: 'RMB',
+  costCurrency: 'CNY',
+  costExchangeRate: 39.5,
   unitCost: 0,
-  sellCurrency: 'RMB',
+  sellCurrency: 'CNY',
+  sellExchangeRate: 39.5,
   baseSellPrice: 0,
   imageUrl: '',
   notes: '',
@@ -82,7 +87,11 @@ export const InventoryView: React.FC = () => {
     const q = search.trim().toLowerCase();
     return inventory.filter((item) => {
       if (categoryFilter !== 'All' && item.category !== categoryFilter) return false;
-      if (currencyFilter !== 'All' && item.sellCurrency !== currencyFilter) return false;
+      if (
+        currencyFilter !== 'All' &&
+        normalizeCurrencyCode(item.sellCurrency) !== normalizeCurrencyCode(currencyFilter)
+      )
+        return false;
       if (stockFilter === 'In Stock' && item.stockQty <= 0) return false;
       if (stockFilter === 'Low Stock' && (item.stockQty <= 0 || item.stockQty > item.minStockAlert))
         return false;
@@ -102,15 +111,33 @@ export const InventoryView: React.FC = () => {
   }, [inventory, search, categoryFilter, currencyFilter, stockFilter]);
 
   const openAdd = () => {
+    const defCur = profile.defaultCurrency || 'CNY';
+    const defRate = defCur === 'PKR' ? 1 : getRateForCurrency(defCur, profile);
     setEditingItem(null);
     setForm({
       ...EMPTY_FORM,
+      costCurrency: defCur,
+      costExchangeRate: defRate,
+      sellCurrency: defCur,
+      sellExchangeRate: defRate,
       sku: `NAG-GM-${Math.floor(100 + Math.random() * 899)}`,
     });
     setShowModal(true);
   };
 
   const openEdit = (item: InventoryItem) => {
+    const costRate =
+      item.costCurrency === 'PKR'
+        ? 1
+        : typeof item.costExchangeRate === 'number'
+          ? item.costExchangeRate
+          : getRateForCurrency(item.costCurrency, profile);
+    const sellRate =
+      item.sellCurrency === 'PKR'
+        ? 1
+        : typeof item.sellExchangeRate === 'number'
+          ? item.sellExchangeRate
+          : getRateForCurrency(item.sellCurrency, profile);
     setEditingItem(item);
     setForm({
       sku: item.sku,
@@ -131,8 +158,10 @@ export const InventoryView: React.FC = () => {
       vaultLocation: item.vaultLocation,
       supplierName: item.supplierName,
       costCurrency: item.costCurrency,
+      costExchangeRate: costRate,
       unitCost: item.unitCost,
       sellCurrency: item.sellCurrency,
+      sellExchangeRate: sellRate,
       baseSellPrice: item.baseSellPrice,
       imageUrl: item.imageUrl || '',
       notes: item.notes || '',
@@ -172,8 +201,8 @@ export const InventoryView: React.FC = () => {
             22-Column Gemstone & Jewelry Inventory
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Showing {filtered.length} of {inventory.length} items · Rates: RMB {profile.rmbToPkr} /
-            USD {profile.usdToPkr} · Markup {profile.defaultMarkupPercent}%
+            Showing {filtered.length} of {inventory.length} items · Default FX:{' '}
+            {profile.defaultCurrency || 'CNY'} → PKR {getRateForCurrency(profile.defaultCurrency || 'CNY', profile)} · Markup {profile.defaultMarkupPercent}%
           </p>
         </div>
 
@@ -237,16 +266,15 @@ export const InventoryView: React.FC = () => {
             ))}
           </select>
 
-          <select
-            value={currencyFilter}
-            onChange={(e) => setCurrencyFilter(e.target.value as 'All' | CurrencyCode)}
-            className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs text-slate-700 dark:text-slate-200 min-h-[40px]"
-          >
-            <option value="All">All Currencies</option>
-            <option value="RMB">RMB (¥)</option>
-            <option value="USD">USD ($)</option>
-            <option value="PKR">PKR (Rs)</option>
-          </select>
+          <div className="w-52">
+            <WorldCurrencySelect
+              value={currencyFilter}
+              onChange={(code) => setCurrencyFilter(code as 'All' | CurrencyCode)}
+              includeAllOption
+              allLabel="All World Currencies"
+              ariaLabel="Filter by sell currency"
+            />
+          </div>
 
           <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-950 rounded-lg border border-slate-200 dark:border-slate-800">
             {(['All', 'In Stock', 'Low Stock', 'Out'] as const).map((st) => (
@@ -295,7 +323,7 @@ export const InventoryView: React.FC = () => {
                 <th className="py-3 px-3 font-semibold text-right">19. Cost (Orig)</th>
                 <th className="py-3 px-3 font-semibold">20. Sell Cur</th>
                 <th className="py-3 px-3 font-semibold text-right">21. Base Sell</th>
-                <th className="py-3 px-3 font-semibold text-right">22. Final PKR (+{profile.defaultMarkupPercent}%)</th>
+                <th className="py-3 px-3 font-semibold text-right">22. Final Price (+{profile.defaultMarkupPercent}%)</th>
                 <th className="py-3 px-3 font-semibold text-right sticky right-0 bg-slate-50 dark:bg-slate-950 border-l border-slate-200 dark:border-slate-800">
                   Actions
                 </th>
@@ -310,16 +338,18 @@ export const InventoryView: React.FC = () => {
                 </tr>
               ) : (
                 filtered.map((item) => {
-                  const costPkr = convertToPkr(
-                    item.unitCost,
-                    item.costCurrency,
-                    profile.rmbToPkr,
-                    profile.usdToPkr
-                  );
+                  const itemCostRate =
+                    item.costCurrency === 'PKR'
+                      ? 1
+                      : typeof item.costExchangeRate === 'number'
+                        ? item.costExchangeRate
+                        : getRateForCurrency(item.costCurrency, profile);
+                  const costPkr = convertToPkr(item.unitCost, item.costCurrency, itemCostRate);
                   const sellCalc = computeItemFinalPkr(
                     item.baseSellPrice,
                     item.sellCurrency,
-                    profile
+                    profile,
+                    item.sellExchangeRate
                   );
 
                   return (
@@ -407,7 +437,13 @@ export const InventoryView: React.FC = () => {
                       </td>
                       <td
                         className="py-2.5 px-3 text-right font-mono whitespace-nowrap"
-                        title={canViewCost ? `~ ${formatMoney(costPkr, 'PKR')}` : ''}
+                        title={
+                          canViewCost
+                            ? item.costCurrency !== 'PKR' && itemCostRate === 0
+                              ? `Rate=0 (Kept in ${item.costCurrency})`
+                              : `~ ${formatMoney(costPkr, 'PKR')}`
+                            : ''
+                        }
                       >
                         {canViewCost ? formatMoney(item.unitCost, item.costCurrency) : 'Restricted'}
                       </td>
@@ -417,8 +453,15 @@ export const InventoryView: React.FC = () => {
                       <td className="py-2.5 px-3 text-right font-mono whitespace-nowrap">
                         {formatMoney(item.baseSellPrice, item.sellCurrency)}
                       </td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                        {formatMoney(sellCalc.finalPkr, 'PKR')}
+                      <td
+                        className="py-2.5 px-3 text-right font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap"
+                        title={
+                          sellCalc.isOriginalCurrency
+                            ? `Rate = 0 (Kept in ${sellCalc.finalCurrency})`
+                            : `Rate: ${sellCalc.rate}`
+                        }
+                      >
+                        {formatMoney(sellCalc.finalDisplayAmount, sellCalc.finalCurrency)}
                       </td>
                       <td className="py-2.5 px-3 text-right sticky right-0 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">
@@ -665,19 +708,34 @@ export const InventoryView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    18. Cost Currency
+                    18. Cost Currency (World List)
                   </label>
-                  <select
+                  <WorldCurrencySelect
                     value={form.costCurrency}
-                    onChange={(e) =>
-                      setForm({ ...form, costCurrency: e.target.value as CurrencyCode })
+                    onChange={(code) =>
+                      setForm({
+                        ...form,
+                        costCurrency: code,
+                        costExchangeRate: code === 'PKR' ? 1 : getRateForCurrency(code, profile),
+                      })
                     }
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono"
-                  >
-                    <option value="RMB">RMB</option>
-                    <option value="USD">USD</option>
-                    <option value="PKR">PKR</option>
-                  </select>
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Cost Rate → PKR (0 = Keep in {form.costCurrency})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={form.costCurrency === 'PKR'}
+                    value={form.costCurrency === 'PKR' ? 1 : (form.costExchangeRate ?? getRateForCurrency(form.costCurrency, profile))}
+                    onChange={(e) =>
+                      setForm({ ...form, costExchangeRate: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono disabled:opacity-60"
+                  />
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -694,19 +752,34 @@ export const InventoryView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    20. Selling Currency
+                    20. Selling Currency (World List)
                   </label>
-                  <select
+                  <WorldCurrencySelect
                     value={form.sellCurrency}
-                    onChange={(e) =>
-                      setForm({ ...form, sellCurrency: e.target.value as CurrencyCode })
+                    onChange={(code) =>
+                      setForm({
+                        ...form,
+                        sellCurrency: code,
+                        sellExchangeRate: code === 'PKR' ? 1 : getRateForCurrency(code, profile),
+                      })
                     }
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono"
-                  >
-                    <option value="RMB">RMB</option>
-                    <option value="USD">USD</option>
-                    <option value="PKR">PKR</option>
-                  </select>
+                  />
+                </div>
+                <div>
+                  <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    Sell Rate → PKR (0 = Keep in {form.sellCurrency})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    disabled={form.sellCurrency === 'PKR'}
+                    value={form.sellCurrency === 'PKR' ? 1 : (form.sellExchangeRate ?? getRateForCurrency(form.sellCurrency, profile))}
+                    onChange={(e) =>
+                      setForm({ ...form, sellExchangeRate: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono disabled:opacity-60"
+                  />
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -723,14 +796,21 @@ export const InventoryView: React.FC = () => {
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    22. Auto Final PKR (+{profile.defaultMarkupPercent}%)
+                    22. Auto Final Price (+{profile.defaultMarkupPercent}%)
                   </label>
-                  <div className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 font-mono font-bold text-emerald-800 dark:text-emerald-300">
-                    {formatMoney(
-                      computeItemFinalPkr(form.baseSellPrice, form.sellCurrency, profile).finalPkr,
-                      'PKR'
-                    )}
-                  </div>
+                  {(() => {
+                    const liveSell = computeItemFinalPkr(
+                      form.baseSellPrice,
+                      form.sellCurrency,
+                      profile,
+                      form.sellExchangeRate
+                    );
+                    return (
+                      <div className="w-full rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                        {formatMoney(liveSell.finalDisplayAmount, liveSell.finalCurrency)}
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div>
                   <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">

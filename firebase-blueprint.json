@@ -25,6 +25,8 @@
         "whatsapp": { "type": "string", "maxLength": 40 },
         "email": { "type": "string", "maxLength": 160 },
         "ntn": { "type": "string", "maxLength": 64 },
+        "defaultCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
+        "currencyRatesJson": { "type": "string", "maxLength": 8000 },
         "rmbToPkr": { "type": "number" },
         "usdToPkr": { "type": "number" },
         "defaultMarkupPercent": { "type": "number" },
@@ -58,9 +60,11 @@
         "minStockAlert": { "type": "number" },
         "vaultLocation": { "type": "string", "maxLength": 80 },
         "supplierName": { "type": "string", "maxLength": 140 },
-        "costCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "costCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
+        "costExchangeRate": { "type": "number" },
         "unitCost": { "type": "number" },
-        "sellCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "sellCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
+        "sellExchangeRate": { "type": "number" },
         "baseSellPrice": { "type": "number" },
         "imageUrl": { "type": "string", "maxLength": 250000 },
         "notes": { "type": "string", "maxLength": 500 },
@@ -79,7 +83,7 @@
         "supplierName": { "type": "string", "minLength": 1, "maxLength": 140 },
         "supplierContact": { "type": "string", "maxLength": 80 },
         "purchaseDate": { "type": "string", "maxLength": 40 },
-        "currency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
         "exchangeRateApplied": { "type": "number" },
         "itemCostOrig": { "type": "number" },
         "importCostOrig": { "type": "number" },
@@ -104,11 +108,12 @@
         "customerPhone": { "type": "string", "maxLength": 40 },
         "customerAddress": { "type": "string", "maxLength": 300 },
         "orderDate": { "type": "string", "maxLength": 40 },
-        "sourceCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "sourceCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
         "rmbRateUsed": { "type": "number" },
         "usdRateUsed": { "type": "number" },
         "markupPercentUsed": { "type": "number" },
-        "finalCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "finalCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
+        "exchangeRateApplied": { "type": "number" },
         "baseSubtotal": { "type": "number" },
         "convertedAmountPkr": { "type": "number" },
         "finalTotal": { "type": "number" },
@@ -117,6 +122,11 @@
         "profitPkr": { "type": "number" },
         "paidAmountPkr": { "type": "number" },
         "paymentStatus": { "type": "string", "enum": ["Paid", "Partial", "Pending"] },
+        "courierCharges": { "type": "number" },
+        "dispatchStatus": { "type": "string", "enum": ["Pending", "Dispatched"] },
+        "expectedArrivalDate": { "type": "string", "maxLength": 40 },
+        "dispatchedAt": { "type": "string", "maxLength": 60 },
+        "notes": { "type": "string", "maxLength": 500 },
         "itemsPayload": { "type": "string", "maxLength": 12000 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -137,7 +147,7 @@
         "quantity": { "type": "number" },
         "reason": { "type": "string", "maxLength": 300 },
         "restocked": { "type": "boolean" },
-        "refundCurrency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "refundCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
         "exchangeRateApplied": { "type": "number" },
         "refundAmountOrig": { "type": "number" },
         "refundAmountPkr": { "type": "number" },
@@ -150,7 +160,7 @@
     },
     "PaymentRecord": {
       "title": "PaymentRecord",
-      "description": "Incoming and outgoing cash flow payment record in RMB, USD, or PKR.",
+      "description": "Incoming and outgoing cash flow payment record in any world currency.",
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
@@ -158,7 +168,7 @@
         "category": { "type": "string", "maxLength": 80 },
         "partyName": { "type": "string", "minLength": 1, "maxLength": 140 },
         "referenceNo": { "type": "string", "maxLength": 80 },
-        "currency": { "type": "string", "enum": ["RMB", "USD", "PKR"] },
+        "currency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
         "exchangeRateApplied": { "type": "number" },
         "amountOrig": { "type": "number" },
         "amountPkr": { "type": "number" },
@@ -202,6 +212,26 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["ownerId", "name", "role", "active", "createdAt", "updatedAt"]
+    },
+    "PartyAccount": {
+      "title": "PartyAccount",
+      "description": "Customer or Vendor profile with address, contact number, city, and editable credit limit.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "partyType": { "type": "string", "enum": ["Customer", "Vendor", "Both"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "contactNumber": { "type": "string", "maxLength": 60 },
+        "address": { "type": "string", "maxLength": 400 },
+        "city": { "type": "string", "maxLength": 100 },
+        "creditLimit": { "type": "number" },
+        "creditCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
+        "creditExchangeRate": { "type": "number" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "partyType", "name", "creditLimit", "creditCurrency", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -240,6 +270,10 @@
     "/workspaces/{workspaceId}/staff/{staffId}": {
       "schema": { "$ref": "#/entities/StaffAccount" },
       "description": "Multi-user staff accounts and role permissions."
+    },
+    "/workspaces/{workspaceId}/parties/{partyId}": {
+      "schema": { "$ref": "#/entities/PartyAccount" },
+      "description": "Customers and vendors directory with editable address, contact number, city, and credit limit."
     }
   }
 }

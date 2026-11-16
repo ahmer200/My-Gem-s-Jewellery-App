@@ -1,4 +1,9 @@
 import { CompanyProfile, CurrencyCode } from '../types/business';
+import {
+  DEFAULT_CURRENCY_RATES_PKR,
+  getWorldCurrency,
+  normalizeCurrencyCode,
+} from './worldCurrencies';
 
 export interface LineItemCalcInput {
   quantity: number;
@@ -9,9 +14,9 @@ export interface LineItemCalcInput {
 export interface InvoiceCalculationInput {
   baseSubtotal: number;
   sourceCurrency: CurrencyCode;
-  rmbRateUsed: number;
-  usdRateUsed: number;
+  exchangeRateUsed: number;
   markupPercentUsed: number;
+  courierCharges?: number;
   items?: LineItemCalcInput[];
 }
 
@@ -24,31 +29,22 @@ export interface InvoiceCalculationResult {
   convertedAmountPkr: number;
   markupPercentUsed: number;
   markupAmount: number;
+  courierCharges: number;
+  courierChargesPkrEquivalent: number;
   finalTotal: number;
   finalTotalPkrEquivalent: number;
   calculationExplanation: string;
 }
 
 export function getCurrencySymbol(currency: CurrencyCode): string {
-  switch (currency) {
-    case 'RMB':
-      return '¥ RMB';
-    case 'USD':
-      return '$ USD';
-    case 'PKR':
-      return 'Rs. PKR';
-  }
+  const info = getWorldCurrency(currency);
+  return `${info.symbol} ${info.code}`;
 }
 
 export function getCurrencyShortSymbol(currency: CurrencyCode): string {
-  switch (currency) {
-    case 'RMB':
-      return 'RMB';
-    case 'USD':
-      return 'USD';
-    case 'PKR':
-      return 'PKR';
-  }
+  const clean = (currency || 'PKR').trim().toUpperCase();
+  if (clean === 'RMB') return 'RMB';
+  return clean || 'PKR';
 }
 
 export function formatMoney(amount: number, currency: CurrencyCode): string {
@@ -60,27 +56,76 @@ export function formatMoney(amount: number, currency: CurrencyCode): string {
   return `${formatted} ${getCurrencyShortSymbol(currency)}`;
 }
 
+/**
+ * Look up the saved conversion rate (-> PKR) for any world currency from CompanyProfile,
+ * falling back to DEFAULT_CURRENCY_RATES_PKR or 0 if not set.
+ */
+export function getRateForCurrency(
+  currency: CurrencyCode,
+  profile?: Pick<CompanyProfile, 'currencyRates' | 'rmbToPkr' | 'usdToPkr'> | null
+): number {
+  const raw = (currency || 'PKR').trim().toUpperCase();
+  if (raw === 'PKR') return 1;
+  const normalized = normalizeCurrencyCode(raw);
+
+  if (profile?.currencyRates) {
+    if (typeof profile.currencyRates[raw] === 'number') {
+      return Math.max(0, profile.currencyRates[raw]);
+    }
+    if (typeof profile.currencyRates[normalized] === 'number') {
+      return Math.max(0, profile.currencyRates[normalized]);
+    }
+  }
+
+  if ((raw === 'RMB' || normalized === 'CNY') && typeof profile?.rmbToPkr === 'number') {
+    return Math.max(0, profile.rmbToPkr);
+  }
+  if (normalized === 'USD' && typeof profile?.usdToPkr === 'number') {
+    return Math.max(0, profile.usdToPkr);
+  }
+
+  if (typeof DEFAULT_CURRENCY_RATES_PKR[raw] === 'number') {
+    return DEFAULT_CURRENCY_RATES_PKR[raw];
+  }
+  if (typeof DEFAULT_CURRENCY_RATES_PKR[normalized] === 'number') {
+    return DEFAULT_CURRENCY_RATES_PKR[normalized];
+  }
+  return 0;
+}
+
 export function convertToPkr(
   amount: number,
   currency: CurrencyCode,
-  rmbToPkr: number,
-  usdToPkr: number
+  rateOrProfile:
+    | number
+    | Pick<CompanyProfile, 'currencyRates' | 'rmbToPkr' | 'usdToPkr'>
+    | undefined
 ): number {
   const safeAmount = Number.isFinite(amount) ? amount : 0;
-  if (currency === 'PKR') return safeAmount;
-  if (currency === 'RMB') return rmbToPkr > 0 ? safeAmount * rmbToPkr : safeAmount;
-  if (currency === 'USD') return usdToPkr > 0 ? safeAmount * usdToPkr : safeAmount;
-  return safeAmount;
+  const clean = (currency || 'PKR').trim().toUpperCase();
+  if (clean === 'PKR') return safeAmount;
+
+  const rate =
+    typeof rateOrProfile === 'number'
+      ? Math.max(0, rateOrProfile)
+      : getRateForCurrency(clean, rateOrProfile);
+
+  return rate > 0 ? safeAmount * rate : safeAmount;
 }
 
-export function getRateForCurrency(
-  currency: CurrencyCode,
-  rmbToPkr: number,
-  usdToPkr: number
+export function convertAmountBetweenCurrencies(
+  amount: number,
+  fromCur: CurrencyCode,
+  toCur: CurrencyCode,
+  fromRateToPkr: number,
+  toRateToPkr: number
 ): number {
-  if (currency === 'RMB') return rmbToPkr;
-  if (currency === 'USD') return usdToPkr;
-  return 1;
+  const fromClean = normalizeCurrencyCode(fromCur);
+  const toClean = normalizeCurrencyCode(toCur);
+  if (fromClean === toClean) return Number((amount || 0).toFixed(2));
+  const pkr = fromClean === 'PKR' ? amount : (fromRateToPkr > 0 ? amount * fromRateToPkr : amount);
+  if (toClean === 'PKR') return Number(pkr.toFixed(2));
+  return Number((toRateToPkr > 0 ? pkr / toRateToPkr : pkr).toFixed(2));
 }
 
 export function getLineItemAmounts(
@@ -104,21 +149,19 @@ export function getLineItemAmounts(
 }
 
 /**
- * Exact Invoice Currency & Per-Item Percentage Calculation System:
- * - Each line item can carry its own percentage markup (or fallback to invoice default %).
- * - If product price is entered in RMB and RMB rate > 0: auto convert RMB -> PKR using RMB rate, apply per-item markup %, show final PKR price.
- * - If product price is entered in USD and USD rate > 0 (and RMB rate is not 0): auto convert USD -> PKR using USD rate, apply per-item markup %, show final PKR price.
- * - If RMB value = 0 in invoice (or active foreign rate = 0): invoice total is calculated and shown in original currency (RMB or USD),
- *   and final amount clearly mentions currency symbol (RMB / USD / PKR) at the end of bill.
- * - If product price is entered in PKR: apply per-item markup % directly in PKR.
+ * Universal World Currency & Per-Item Percentage Calculation System:
+ * - Supports any world currency (PKR, USD, CNY, AED, SAR, EUR, GBP, etc.).
+ * - If sourceCurrency === 'PKR': calculates directly in PKR.
+ * - If conversion box (exchangeRateUsed) > 0: converts sourceCurrency -> PKR at exchangeRateUsed, applies markup % & courier charges in PKR.
+ * - If conversion box (exchangeRateUsed) === 0: keeps invoice & final amount in its selected sourceCurrency (NO PKR conversion).
  */
 export function calculateInvoiceTotals(
   input: InvoiceCalculationInput,
-  fallbackProfile?: Pick<CompanyProfile, 'rmbToPkr' | 'usdToPkr'>
+  fallbackProfile?: Pick<CompanyProfile, 'currencyRates' | 'rmbToPkr' | 'usdToPkr'>
 ): InvoiceCalculationResult {
-  const rmbRate = Math.max(0, Number(input.rmbRateUsed) || 0);
-  const usdRate = Math.max(0, Number(input.usdRateUsed) || 0);
+  const rate = Math.max(0, Number(input.exchangeRateUsed) || 0);
   const defaultMarkup = Math.max(0, Number(input.markupPercentUsed) || 0);
+  const srcCode = getCurrencyShortSymbol(input.sourceCurrency);
 
   let baseSubtotal = Math.max(0, Number(input.baseSubtotal) || 0);
   let totalMarkupOrig = baseSubtotal * (defaultMarkup / 100);
@@ -139,9 +182,12 @@ export function calculateInvoiceTotals(
         : defaultMarkup;
   }
 
-  if (input.sourceCurrency === 'PKR') {
+  const courierCharges = Math.max(0, Number(input.courierCharges) || 0);
+  const courierNote = courierCharges > 0 ? ` + Courier ${courierCharges.toFixed(2)}` : '';
+
+  if (srcCode === 'PKR') {
     const markupAmount = totalMarkupOrig;
-    const finalTotal = baseSubtotal + markupAmount;
+    const finalTotal = baseSubtotal + markupAmount + courierCharges;
     return {
       sourceCurrency: 'PKR',
       finalCurrency: 'PKR',
@@ -151,66 +197,133 @@ export function calculateInvoiceTotals(
       convertedAmountPkr: baseSubtotal,
       markupPercentUsed: effectiveMarkupPercent,
       markupAmount,
+      courierCharges,
+      courierChargesPkrEquivalent: courierCharges,
       finalTotal,
       finalTotalPkrEquivalent: finalTotal,
-      calculationExplanation: `Entered in PKR (Rate: 1.00) + ${effectiveMarkupPercent}% avg item markup = ${formatMoney(finalTotal, 'PKR')}`,
+      calculationExplanation: `Entered in PKR (Rate: 1.00) + ${effectiveMarkupPercent}% avg item markup${courierNote} = ${formatMoney(finalTotal, 'PKR')}`,
     };
   }
 
-  // Rule: If RMB value = 0 in invoice, show invoice total in original currency (RMB or USD)
-  if (rmbRate === 0 || (input.sourceCurrency === 'USD' && usdRate === 0)) {
+  // Rule: If conversion rate box = 0, keep the amount in its own selected currency (not PKR)
+  if (rate === 0) {
     const markupAmount = totalMarkupOrig;
-    const finalTotal = baseSubtotal + markupAmount;
-    const referenceRate =
-      input.sourceCurrency === 'RMB'
-        ? fallbackProfile?.rmbToPkr || 0
-        : fallbackProfile?.usdToPkr || usdRate || 0;
+    const finalTotal = baseSubtotal + markupAmount + courierCharges;
+    const referenceRate = getRateForCurrency(srcCode, fallbackProfile);
     const pkrEquivalent = referenceRate > 0 ? finalTotal * referenceRate : finalTotal;
+    const courierPkr = referenceRate > 0 ? courierCharges * referenceRate : courierCharges;
 
     return {
-      sourceCurrency: input.sourceCurrency,
-      finalCurrency: input.sourceCurrency,
+      sourceCurrency: srcCode,
+      finalCurrency: srcCode,
       exchangeRateApplied: 0,
       isOriginalCurrencyMode: true,
       baseSubtotal,
       convertedAmountPkr: 0,
       markupPercentUsed: effectiveMarkupPercent,
       markupAmount,
+      courierCharges,
+      courierChargesPkrEquivalent: courierPkr,
       finalTotal,
       finalTotalPkrEquivalent: pkrEquivalent,
-      calculationExplanation: `RMB Rate = 0 (Original Currency Mode): ${formatMoney(baseSubtotal, input.sourceCurrency)} + ${effectiveMarkupPercent}% item markup = ${formatMoney(finalTotal, input.sourceCurrency)}`,
+      calculationExplanation: `Conversion Rate = 0 (Kept in ${srcCode}): ${formatMoney(baseSubtotal, srcCode)} + ${effectiveMarkupPercent}% item markup${courierNote} = ${formatMoney(finalTotal, srcCode)}`,
     };
   }
 
-  // Standard Foreign Currency -> PKR conversion + per-item percentage markup
-  const activeRate = input.sourceCurrency === 'RMB' ? rmbRate : usdRate;
-  const convertedAmountPkr = baseSubtotal * activeRate;
-  const markupAmount = totalMarkupOrig * activeRate;
-  const finalTotal = convertedAmountPkr + markupAmount;
+  // Standard Foreign Currency -> PKR conversion + per-item percentage markup + courier charges (PKR)
+  const convertedAmountPkr = baseSubtotal * rate;
+  const markupAmount = totalMarkupOrig * rate;
+  const finalTotal = convertedAmountPkr + markupAmount + courierCharges;
 
   return {
-    sourceCurrency: input.sourceCurrency,
+    sourceCurrency: srcCode,
     finalCurrency: 'PKR',
-    exchangeRateApplied: activeRate,
+    exchangeRateApplied: rate,
     isOriginalCurrencyMode: false,
     baseSubtotal,
     convertedAmountPkr,
     markupPercentUsed: effectiveMarkupPercent,
     markupAmount,
+    courierCharges,
+    courierChargesPkrEquivalent: courierCharges,
     finalTotal,
     finalTotalPkrEquivalent: finalTotal,
-    calculationExplanation: `${formatMoney(baseSubtotal, input.sourceCurrency)} × ${activeRate.toFixed(2)} = ${formatMoney(convertedAmountPkr, 'PKR')} + ${effectiveMarkupPercent}% item markup = ${formatMoney(finalTotal, 'PKR')}`,
+    calculationExplanation: `${formatMoney(baseSubtotal, srcCode)} × ${rate.toFixed(2)} = ${formatMoney(convertedAmountPkr, 'PKR')} + ${effectiveMarkupPercent}% item markup${courierNote} = ${formatMoney(finalTotal, 'PKR')}`,
+  };
+}
+
+export function computeItemFinalPrice(
+  baseSellPrice: number,
+  sellCurrency: CurrencyCode,
+  profile: Pick<CompanyProfile, 'currencyRates' | 'rmbToPkr' | 'usdToPkr' | 'defaultMarkupPercent'>,
+  overrideRate?: number
+): {
+  convertedAmount: number;
+  finalAmount: number;
+  finalCurrency: CurrencyCode;
+  finalPkrEquivalent: number;
+  rate: number;
+  isOriginalCurrency: boolean;
+} {
+  const cleanCur = getCurrencyShortSymbol(sellCurrency);
+  const rawPrice = Math.max(0, Number(baseSellPrice) || 0);
+  const markupFactor = 1 + (profile.defaultMarkupPercent || 0) / 100;
+
+  if (cleanCur === 'PKR') {
+    const finalAmount = rawPrice * markupFactor;
+    return {
+      convertedAmount: rawPrice,
+      finalAmount,
+      finalCurrency: 'PKR',
+      finalPkrEquivalent: finalAmount,
+      rate: 1,
+      isOriginalCurrency: false,
+    };
+  }
+
+  const rate =
+    typeof overrideRate === 'number'
+      ? Math.max(0, overrideRate)
+      : getRateForCurrency(cleanCur, profile);
+
+  if (rate === 0) {
+    const finalAmount = rawPrice * markupFactor;
+    const refRate = getRateForCurrency(cleanCur, profile);
+    return {
+      convertedAmount: rawPrice,
+      finalAmount,
+      finalCurrency: cleanCur,
+      finalPkrEquivalent: refRate > 0 ? finalAmount * refRate : finalAmount,
+      rate: 0,
+      isOriginalCurrency: true,
+    };
+  }
+
+  const convertedAmount = rawPrice * rate;
+  const finalAmount = convertedAmount * markupFactor;
+  return {
+    convertedAmount,
+    finalAmount,
+    finalCurrency: 'PKR',
+    finalPkrEquivalent: finalAmount,
+    rate,
+    isOriginalCurrency: false,
   };
 }
 
 export function computeItemFinalPkr(
   baseSellPrice: number,
   sellCurrency: CurrencyCode,
-  profile: Pick<CompanyProfile, 'rmbToPkr' | 'usdToPkr' | 'defaultMarkupPercent'>
-): { convertedPkr: number; finalPkr: number; rate: number } {
-  const rate = getRateForCurrency(sellCurrency, profile.rmbToPkr, profile.usdToPkr);
-  const convertedPkr =
-    sellCurrency === 'PKR' ? baseSellPrice : rate > 0 ? baseSellPrice * rate : baseSellPrice;
-  const finalPkr = convertedPkr * (1 + (profile.defaultMarkupPercent || 0) / 100);
-  return { convertedPkr, finalPkr, rate };
+  profile: Pick<CompanyProfile, 'currencyRates' | 'rmbToPkr' | 'usdToPkr' | 'defaultMarkupPercent'>,
+  overrideRate?: number
+): { convertedPkr: number; finalPkr: number; rate: number; finalCurrency: CurrencyCode; finalDisplayAmount: number; isOriginalCurrency: boolean } {
+  const res = computeItemFinalPrice(baseSellPrice, sellCurrency, profile, overrideRate);
+  return {
+    convertedPkr: res.convertedAmount,
+    finalPkr: res.finalPkrEquivalent,
+    rate: res.rate,
+    finalCurrency: res.finalCurrency,
+    finalDisplayAmount: res.finalAmount,
+    isOriginalCurrency: res.isOriginalCurrency,
+  };
 }

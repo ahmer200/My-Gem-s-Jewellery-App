@@ -1,15 +1,55 @@
+import fs from 'fs';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, Plugin } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+function aqsaVersionManifestPlugin(buildId: string, builtAt: string): Plugin {
+  const payload = JSON.stringify(
+    {
+      app: 'aqsa-bms',
+      name: 'Aqsa Business Management System',
+      version: '1.0.0',
+      buildId,
+      builtAt,
+    },
+    null,
+    2
+  );
+
+  return {
+    name: 'aqsa-version-manifest',
+    configureServer(server) {
+      server.middlewares.use('/version.json', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+        res.end(payload);
+      });
+    },
+    closeBundle() {
+      const distDir = path.resolve(__dirname, 'dist');
+      if (fs.existsSync(distDir)) {
+        fs.writeFileSync(path.join(distDir, 'version.json'), payload, 'utf-8');
+      }
+    },
+  };
+}
+
 export default defineConfig(() => {
+  const builtAt = new Date().toISOString();
+  const buildId = builtAt.replace(/[-:T]/g, '').slice(0, 14);
+
   return {
     base: './',
+    define: {
+      __APP_BUILD_ID__: JSON.stringify(buildId),
+      __APP_BUILT_AT__: JSON.stringify(builtAt),
+    },
     plugins: [
       react(),
       tailwindcss(),
+      aqsaVersionManifestPlugin(buildId, builtAt),
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
@@ -45,9 +85,17 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
           maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg,woff,woff2}'],
+          globIgnores: ['**/version.json'],
           runtimeCaching: [
+            {
+              urlPattern: /\/version\.json(\?.*)?$/i,
+              handler: 'NetworkOnly',
+            },
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
               handler: 'CacheFirst',

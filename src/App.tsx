@@ -3,6 +3,7 @@ import {
   BarChart3,
   BellRing,
   Cloud,
+  Contact,
   Gem,
   LayoutDashboard,
   Menu,
@@ -23,6 +24,7 @@ import { DashboardView } from './modules/DashboardView';
 import { InventoryView } from './modules/InventoryView';
 import { PurchasesView } from './modules/PurchasesView';
 import { SalesView } from './modules/SalesView';
+import { PartiesView } from './modules/PartiesView';
 import { ScannerView } from './modules/ScannerView';
 import { ReturnsView } from './modules/ReturnsView';
 import { PaymentsView } from './modules/PaymentsView';
@@ -30,12 +32,15 @@ import { RemindersView } from './modules/RemindersView';
 import { ReportsView } from './modules/ReportsView';
 import { UsersView } from './modules/UsersView';
 import { SettingsView } from './modules/SettingsView';
-import { OfflineIndicator, PWAInstallButton } from './components/PWAControls';
+import { AppUpdateBanner, OfflineIndicator, PWAInstallButton } from './components/PWAControls';
+import { getRateForCurrency } from './utils/currency';
+import { normalizeCurrencyCode } from './utils/worldCurrencies';
 
 const NAV_ITEMS: { id: ModuleId; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', shortLabel: 'Home', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory (22-Col)', shortLabel: 'Stock', icon: Gem },
   { id: 'sales', label: 'Sales & Invoices', shortLabel: 'Sales', icon: Receipt },
+  { id: 'parties', label: 'Customers & Vendors', shortLabel: 'Parties', icon: Contact },
   { id: 'scanner', label: 'QR / Barcode Scan', shortLabel: 'Scan', icon: QrCode },
   { id: 'purchases', label: 'Purchases', shortLabel: 'Buy', icon: ShoppingBag },
   { id: 'returns', label: 'Returns & Refunds', shortLabel: 'Returns', icon: RotateCcw },
@@ -57,6 +62,7 @@ const AppShell: React.FC = () => {
     toasts,
     firebaseUser,
     isSyncing,
+    liveSyncActive,
     syncNowToCloud,
     cloudSignIn,
   } = useBusiness();
@@ -64,6 +70,14 @@ const AppShell: React.FC = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const activeNav = NAV_ITEMS.find((n) => n.id === activeModule) || NAV_ITEMS[0];
+  const activeCurrencyCode = normalizeCurrencyCode(profile.defaultCurrency || 'CNY');
+  const activeCurrencyRate = getRateForCurrency(activeCurrencyCode, profile);
+  const activeRateDisplay =
+    activeCurrencyCode === 'PKR'
+      ? '1 PKR'
+      : activeCurrencyRate === 0
+        ? '0 (Own Cur)'
+        : `${activeCurrencyRate} PKR`;
 
   const handleSelectModule = (id: ModuleId) => {
     setActiveModule(id);
@@ -129,10 +143,8 @@ const AppShell: React.FC = () => {
             </span>
           </div>
           <div className="flex items-center justify-between font-mono">
-            <span>RMB / USD:</span>
-            <span className="text-emerald-300">
-              {profile.rmbToPkr} / {profile.usdToPkr}
-            </span>
+            <span>{activeCurrencyCode} → PKR:</span>
+            <span className="text-emerald-300">{activeRateDisplay}</span>
           </div>
         </div>
       </aside>
@@ -203,9 +215,9 @@ const AppShell: React.FC = () => {
           </div>
 
           <div className="hidden md:flex items-center gap-4 text-xs font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
-            <span>RMB→PKR: {profile.rmbToPkr}</span>
-            <span aria-hidden="true">·</span>
-            <span>USD→PKR: {profile.usdToPkr}</span>
+            <span>
+              {activeCurrencyCode}→PKR: {activeCurrencyRate === 0 ? '0 (Own Currency)' : activeCurrencyRate}
+            </span>
             <span aria-hidden="true">·</span>
             <span>Markup: {profile.defaultMarkupPercent}%</span>
           </div>
@@ -218,7 +230,13 @@ const AppShell: React.FC = () => {
               className="hidden sm:flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap min-h-[38px]"
             >
               <Cloud className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
-              {isSyncing ? 'Syncing...' : firebaseUser ? 'Sync Cloud' : 'Cloud Sync'}
+              {isSyncing
+                ? 'Syncing...'
+                : firebaseUser
+                  ? liveSyncActive
+                    ? 'Auto-Sync Live'
+                    : 'Sync Cloud'
+                  : 'Cloud Sync'}
             </button>
             <button
               onClick={toggleTheme}
@@ -236,6 +254,7 @@ const AppShell: React.FC = () => {
           {activeModule === 'inventory' && <InventoryView />}
           {activeModule === 'purchases' && <PurchasesView />}
           {activeModule === 'sales' && <SalesView />}
+          {activeModule === 'parties' && <PartiesView />}
           {activeModule === 'scanner' && <ScannerView />}
           {activeModule === 'returns' && <ReturnsView />}
           {activeModule === 'payments' && <PaymentsView />}
@@ -303,6 +322,7 @@ const AppShell: React.FC = () => {
       </div>
 
       <OfflineIndicator />
+      <AppUpdateBanner />
     </div>
   );
 };

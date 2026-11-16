@@ -32,7 +32,7 @@ service cloud.firestore {
     }
 
     function isValidCurrency(val) {
-      return val is string && val in ['RMB', 'USD', 'PKR'];
+      return val is string && val.size() >= 3 && val.size() <= 6 && val.matches('^[A-Z]{3,6}$');
     }
 
     function isValidWorkspace(data) {
@@ -49,8 +49,8 @@ service cloud.firestore {
       return data.keys().hasAll(['ownerId', 'companyName', 'rmbToPkr', 'usdToPkr', 'defaultMarkupPercent', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
           'ownerId', 'companyName', 'subtitle', 'address', 'contact', 'whatsapp',
-          'email', 'ntn', 'rmbToPkr', 'usdToPkr', 'defaultMarkupPercent',
-          'invoiceFooter', 'logoDataUrl', 'createdAt', 'updatedAt'
+          'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'rmbToPkr', 'usdToPkr',
+          'defaultMarkupPercent', 'invoiceFooter', 'logoDataUrl', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && (data.ownerId == request.auth.uid || isBootstrappedAdmin())
@@ -61,6 +61,8 @@ service cloud.firestore {
         && (!('whatsapp' in data) || (data.whatsapp is string && data.whatsapp.size() <= 40))
         && (!('email' in data) || (data.email is string && data.email.size() <= 160))
         && (!('ntn' in data) || (data.ntn is string && data.ntn.size() <= 64))
+        && (!('defaultCurrency' in data) || isValidCurrency(data.defaultCurrency))
+        && (!('currencyRatesJson' in data) || (data.currencyRatesJson is string && data.currencyRatesJson.size() <= 8000))
         && data.rmbToPkr is number && data.rmbToPkr >= 0
         && data.usdToPkr is number && data.usdToPkr >= 0
         && data.defaultMarkupPercent is number && data.defaultMarkupPercent >= 0 && data.defaultMarkupPercent <= 1000
@@ -76,8 +78,8 @@ service cloud.firestore {
           'ownerId', 'sku', 'name', 'category', 'gemstoneType', 'origin', 'shapeCut',
           'colour', 'clarity', 'weightCarats', 'sizeMm', 'treatment', 'certLab',
           'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
-          'costCurrency', 'unitCost', 'sellCurrency', 'baseSellPrice', 'imageUrl',
-          'notes', 'createdAt', 'updatedAt'
+          'costCurrency', 'costExchangeRate', 'unitCost', 'sellCurrency', 'sellExchangeRate',
+          'baseSellPrice', 'imageUrl', 'notes', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && (data.ownerId == request.auth.uid || isBootstrappedAdmin())
@@ -99,8 +101,10 @@ service cloud.firestore {
         && (!('vaultLocation' in data) || (data.vaultLocation is string && data.vaultLocation.size() <= 80))
         && (!('supplierName' in data) || (data.supplierName is string && data.supplierName.size() <= 140))
         && isValidCurrency(data.costCurrency)
+        && (!('costExchangeRate' in data) || (data.costExchangeRate is number && data.costExchangeRate >= 0))
         && data.unitCost is number && data.unitCost >= 0
         && isValidCurrency(data.sellCurrency)
+        && (!('sellExchangeRate' in data) || (data.sellExchangeRate is number && data.sellExchangeRate >= 0))
         && data.baseSellPrice is number && data.baseSellPrice >= 0
         && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 250000))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
@@ -139,9 +143,10 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'ownerId', 'invoiceNo', 'customerName', 'customerPhone', 'customerAddress',
           'orderDate', 'sourceCurrency', 'rmbRateUsed', 'usdRateUsed', 'markupPercentUsed',
-          'finalCurrency', 'baseSubtotal', 'convertedAmountPkr', 'finalTotal',
+          'finalCurrency', 'exchangeRateApplied', 'baseSubtotal', 'convertedAmountPkr', 'finalTotal',
           'finalTotalPkrEquivalent', 'totalCostPkr', 'profitPkr', 'paidAmountPkr',
-          'paymentStatus', 'itemsPayload', 'createdAt', 'updatedAt'
+          'paymentStatus', 'courierCharges', 'dispatchStatus', 'expectedArrivalDate',
+          'dispatchedAt', 'notes', 'itemsPayload', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
         && (data.ownerId == request.auth.uid || isBootstrappedAdmin())
@@ -155,6 +160,7 @@ service cloud.firestore {
         && (!('usdRateUsed' in data) || (data.usdRateUsed is number && data.usdRateUsed >= 0))
         && (!('markupPercentUsed' in data) || (data.markupPercentUsed is number && data.markupPercentUsed >= 0))
         && isValidCurrency(data.finalCurrency)
+        && (!('exchangeRateApplied' in data) || (data.exchangeRateApplied is number && data.exchangeRateApplied >= 0))
         && (!('baseSubtotal' in data) || (data.baseSubtotal is number && data.baseSubtotal >= 0))
         && (!('convertedAmountPkr' in data) || (data.convertedAmountPkr is number && data.convertedAmountPkr >= 0))
         && data.finalTotal is number && data.finalTotal >= 0
@@ -163,6 +169,11 @@ service cloud.firestore {
         && (!('profitPkr' in data) || data.profitPkr is number)
         && (!('paidAmountPkr' in data) || (data.paidAmountPkr is number && data.paidAmountPkr >= 0))
         && data.paymentStatus is string && data.paymentStatus in ['Paid', 'Partial', 'Pending']
+        && (!('courierCharges' in data) || (data.courierCharges is number && data.courierCharges >= 0))
+        && (!('dispatchStatus' in data) || (data.dispatchStatus is string && data.dispatchStatus in ['Pending', 'Dispatched']))
+        && (!('expectedArrivalDate' in data) || (data.expectedArrivalDate is string && data.expectedArrivalDate.size() <= 40))
+        && (!('dispatchedAt' in data) || (data.dispatchedAt is string && data.dispatchedAt.size() <= 60))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
         && (!('itemsPayload' in data) || (data.itemsPayload is string && data.itemsPayload.size() <= 12000))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -253,6 +264,27 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidPartyAccount(data) {
+      return data.keys().hasAll(['ownerId', 'partyType', 'name', 'creditLimit', 'creditCurrency', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly([
+          'ownerId', 'partyType', 'name', 'contactNumber', 'address', 'city',
+          'creditLimit', 'creditCurrency', 'creditExchangeRate', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
+        && (data.ownerId == request.auth.uid || isBootstrappedAdmin())
+        && data.partyType is string && data.partyType in ['Customer', 'Vendor', 'Both']
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
+        && (!('contactNumber' in data) || (data.contactNumber is string && data.contactNumber.size() <= 60))
+        && (!('address' in data) || (data.address is string && data.address.size() <= 400))
+        && (!('city' in data) || (data.city is string && data.city.size() <= 100))
+        && data.creditLimit is number && data.creditLimit >= 0
+        && isValidCurrency(data.creditCurrency)
+        && (!('creditExchangeRate' in data) || (data.creditExchangeRate is number && data.creditExchangeRate >= 0))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Admins collection (read own status or admin)
     match /admins/{adminId} {
       allow get: if isSignedIn() && isValidId(adminId) && (adminId == request.auth.uid || isAdmin());
@@ -288,8 +320,8 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
             'companyName', 'subtitle', 'address', 'contact', 'whatsapp',
-            'email', 'ntn', 'rmbToPkr', 'usdToPkr', 'defaultMarkupPercent',
-            'invoiceFooter', 'logoDataUrl', 'updatedAt'
+            'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'rmbToPkr', 'usdToPkr',
+            'defaultMarkupPercent', 'invoiceFooter', 'logoDataUrl', 'updatedAt'
           ]);
         allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(settingId)
           && (existing().ownerId == request.auth.uid || isAdmin());
@@ -312,8 +344,8 @@ service cloud.firestore {
             'sku', 'name', 'category', 'gemstoneType', 'origin', 'shapeCut',
             'colour', 'clarity', 'weightCarats', 'sizeMm', 'treatment', 'certLab',
             'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
-            'costCurrency', 'unitCost', 'sellCurrency', 'baseSellPrice', 'imageUrl',
-            'notes', 'updatedAt'
+            'costCurrency', 'costExchangeRate', 'unitCost', 'sellCurrency', 'sellExchangeRate',
+            'baseSellPrice', 'imageUrl', 'notes', 'updatedAt'
           ]);
         allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(itemId)
           && (existing().ownerId == request.auth.uid || isAdmin());
@@ -352,9 +384,22 @@ service cloud.firestore {
           && incoming().ownerId == existing().ownerId
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
-          && incoming().diff(existing()).affectedKeys().hasOnly([
-            'paidAmountPkr', 'paymentStatus', 'itemsPayload', 'updatedAt'
-          ]);
+          && (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'paidAmountPkr', 'paymentStatus', 'updatedAt'
+            ])
+            || (
+              (!('dispatchStatus' in existing()) || existing().dispatchStatus == 'Pending')
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'customerName', 'customerPhone', 'customerAddress', 'orderDate',
+                'sourceCurrency', 'rmbRateUsed', 'usdRateUsed', 'markupPercentUsed',
+                'finalCurrency', 'exchangeRateApplied', 'baseSubtotal', 'convertedAmountPkr', 'finalTotal',
+                'finalTotalPkrEquivalent', 'totalCostPkr', 'profitPkr', 'paidAmountPkr',
+                'paymentStatus', 'courierCharges', 'dispatchStatus', 'expectedArrivalDate',
+                'dispatchedAt', 'notes', 'itemsPayload', 'updatedAt'
+              ])
+            )
+          );
         allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(saleId)
           && (existing().ownerId == request.auth.uid || isAdmin());
       }
@@ -424,6 +469,27 @@ service cloud.firestore {
             'name', 'email', 'role', 'active', 'permissionsList', 'updatedAt'
           ]);
         allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(staffId)
+          && (existing().ownerId == request.auth.uid || isAdmin());
+      }
+
+      match /parties/{partyId} {
+        allow get: if isSignedIn() && isValidId(workspaceId) && isValidId(partyId)
+          && (existing().ownerId == request.auth.uid || isAdmin());
+        allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+        allow create: if isSignedIn() && isValidId(workspaceId) && isValidId(partyId)
+          && isValidPartyAccount(incoming())
+          && incoming().createdAt == request.time && incoming().updatedAt == request.time;
+        allow update: if isSignedIn() && isValidId(workspaceId) && isValidId(partyId)
+          && isValidPartyAccount(incoming())
+          && (existing().ownerId == request.auth.uid || isAdmin())
+          && incoming().ownerId == existing().ownerId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'partyType', 'name', 'contactNumber', 'address', 'city',
+            'creditLimit', 'creditCurrency', 'creditExchangeRate', 'notes', 'updatedAt'
+          ]);
+        allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(partyId)
           && (existing().ownerId == request.auth.uid || isAdmin());
       }
     }

@@ -1,9 +1,10 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import {
   CompanyProfile,
   InventoryItem,
   ModuleId,
+  PartyAccount,
   PaymentRecord,
   PermissionKey,
   PurchaseRecord,
@@ -15,6 +16,7 @@ import {
 } from '../types/business';
 import {
   INITIAL_INVENTORY,
+  INITIAL_PARTIES,
   INITIAL_PAYMENTS,
   INITIAL_PROFILE,
   INITIAL_PURCHASES,
@@ -26,16 +28,22 @@ import {
 } from '../utils/seedData';
 import {
   auth,
+  CloudKnownState,
   deleteCloudDocument,
   pullWorkspaceFromCloud,
   pushWorkspaceToCloud,
   signInWithGoogle,
   signOutFirebase,
+  subscribeToWorkspace,
   testFirestoreConnection,
 } from '../lib/firebase';
 
+import { getRateForCurrency } from '../utils/currency';
+import { DEFAULT_CURRENCY_RATES_PKR } from '../utils/worldCurrencies';
+
 const STORAGE_KEY = 'aqsa_bms_na_gems_v1';
 const THEME_KEY = 'aqsa_bms_theme_v1';
+const AUTO_SYNC_KEY = 'aqsa_bms_auto_sync_v1';
 
 interface StoredBusinessState {
   profile: CompanyProfile;
@@ -47,7 +55,28 @@ interface StoredBusinessState {
   reminders: ReminderLog[];
   reminderSettings: ReminderSettings;
   staff: StaffAccount[];
+  parties: PartyAccount[];
   activeStaffId: string;
+}
+
+function normalizeProfile(rawProfile?: Partial<CompanyProfile>): CompanyProfile {
+  const mergedRates: Record<string, number> = {
+    ...DEFAULT_CURRENCY_RATES_PKR,
+    ...(rawProfile?.currencyRates || {}),
+  };
+  if (typeof rawProfile?.rmbToPkr === 'number' && !rawProfile?.currencyRates?.CNY) {
+    mergedRates.CNY = rawProfile.rmbToPkr;
+    mergedRates.RMB = rawProfile.rmbToPkr;
+  }
+  if (typeof rawProfile?.usdToPkr === 'number' && !rawProfile?.currencyRates?.USD) {
+    mergedRates.USD = rawProfile.usdToPkr;
+  }
+  return {
+    ...INITIAL_PROFILE,
+    ...(rawProfile || {}),
+    defaultCurrency: rawProfile?.defaultCurrency || INITIAL_PROFILE.defaultCurrency,
+    currencyRates: mergedRates,
+  };
 }
 
 function loadInitialState(): StoredBusinessState {
@@ -56,10 +85,16 @@ function loadInitialState(): StoredBusinessState {
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<StoredBusinessState>;
       return {
-        profile: { ...INITIAL_PROFILE, ...(parsed.profile || {}) },
+        profile: normalizeProfile(parsed.profile),
         inventory: Array.isArray(parsed.inventory) ? parsed.inventory : INITIAL_INVENTORY,
         purchases: Array.isArray(parsed.purchases) ? parsed.purchases : INITIAL_PURCHASES,
-        sales: Array.isArray(parsed.sales) ? parsed.sales : INITIAL_SALES,
+        sales: Array.isArray(parsed.sales)
+          ? parsed.sales.map((s) => ({
+              ...s,
+              courierCharges: s.courierCharges ?? 0,
+              dispatchStatus: s.dispatchStatus ?? 'Pending',
+            }))
+          : INITIAL_SALES,
         returns: Array.isArray(parsed.returns) ? parsed.returns : INITIAL_RETURNS,
         payments: Array.isArray(parsed.payments) ? parsed.payments : INITIAL_PAYMENTS,
         reminders: Array.isArray(parsed.reminders) ? parsed.reminders : INITIAL_REMINDERS,
@@ -68,6 +103,7 @@ function loadInitialState(): StoredBusinessState {
           ...(parsed.reminderSettings || {}),
         },
         staff: Array.isArray(parsed.staff) && parsed.staff.length > 0 ? parsed.staff : INITIAL_STAFF,
+        parties: Array.isArray(parsed.parties) ? parsed.parties : INITIAL_PARTIES,
         activeStaffId: parsed.activeStaffId || INITIAL_STAFF[0].id,
       };
     }
@@ -85,6 +121,7 @@ function loadInitialState(): StoredBusinessState {
     reminders: INITIAL_REMINDERS,
     reminderSettings: INITIAL_REMINDER_SETTINGS,
     staff: INITIAL_STAFF,
+    parties: INITIAL_PARTIES,
     activeStaffId: INITIAL_STAFF[0].id,
   };
 }
@@ -108,6 +145,10 @@ interface BusinessContextValue extends StoredBusinessState {
   // Scanner quick cart handoff
   posQueuedSku: string | null;
   setPosQueuedSku: (sku: string | null) => void;
+  // Sale invoice edit handoff
+  queuedEditSaleId: string | null;
+  setQueuedEditSaleId: (id: string | null) => void;
+  openSaleForEdit: (id: string) => void;
   // Mutations
   updateProfile: (next: Partial<CompanyProfile>) => void;
   addInventoryItem: (item: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'>) => InventoryItem;
@@ -117,6 +158,8 @@ interface BusinessContextValue extends StoredBusinessState {
   payPurchaseBalance: (purchaseId: string, amountPkr: number) => void;
   deletePurchase: (id: string) => void;
   addSale: (sale: Omit<SalesOrder, 'id' | 'createdAt'>) => SalesOrder;
+  updateSale: (saleId: string, updated: Omit<SalesOrder, 'id' | 'createdAt'>) => SalesOrder | null;
+  dispatchSale: (saleId: string, expectedArrivalDate: string) => void;
   recordSalePayment: (saleId: string, amountPkr: number, method: PaymentRecord['method']) => void;
   deleteSale: (id: string) => void;
   addReturn: (ret: Omit<ReturnRecord, 'id' | 'createdAt'>) => ReturnRecord;
@@ -129,6 +172,9 @@ interface BusinessContextValue extends StoredBusinessState {
   addStaffAccount: (account: Omit<StaffAccount, 'id' | 'createdAt'>) => void;
   updateStaffAccount: (id: string, patch: Partial<StaffAccount>) => void;
   deleteStaffAccount: (id: string) => void;
+  addParty: (party: Omit<PartyAccount, 'id' | 'createdAt' | 'updatedAt'>) => PartyAccount;
+  updateParty: (id: string, patch: Partial<Omit<PartyAccount, 'id' | 'createdAt'>>) => void;
+  deleteParty: (id: string) => void;
   // Local Backup & Reset
   exportBackupJson: () => void;
   importBackupJson: (jsonText: string) => void;
@@ -138,6 +184,10 @@ interface BusinessContextValue extends StoredBusinessState {
   authReady: boolean;
   isSyncing: boolean;
   lastSyncedAt: string | null;
+  autoSyncEnabled: boolean;
+  setAutoSyncEnabled: (enabled: boolean) => void;
+  liveSyncActive: boolean;
+  pendingOfflineSync: boolean;
   cloudSignIn: () => Promise<void>;
   cloudSignOut: () => Promise<void>;
   syncNowToCloud: () => Promise<void>;
@@ -150,17 +200,51 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [state, setState] = useState<StoredBusinessState>(loadInitialState);
   const [activeModule, setActiveModule] = useState<ModuleId>('dashboard');
   const [posQueuedSku, setPosQueuedSku] = useState<string | null>(null);
+  const [queuedEditSaleId, setQueuedEditSaleId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem(THEME_KEY);
     return saved === 'dark' ? 'dark' : 'light';
   });
 
-  // Firebase Auth & Sync state
+  // Firebase Auth & Real-Time Auto-Sync state
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [autoSyncEnabled, setAutoSyncEnabledState] = useState<boolean>(() => {
+    const saved = localStorage.getItem(AUTO_SYNC_KEY);
+    return saved !== 'false';
+  });
+  const [liveSyncActive, setLiveSyncActive] = useState(false);
+  const [pendingOfflineSync, setPendingOfflineSync] = useState(false);
+  const [localMutationSeq, setLocalMutationSeq] = useState(0);
+
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  const knownCloudStateRef = useRef<CloudKnownState>({
+    workspaceExists: false,
+    profileExists: false,
+    inventoryIds: new Set(),
+    purchaseIds: new Set(),
+    saleDispatchMap: new Map(),
+    returnIds: new Set(),
+    paymentIds: new Set(),
+    reminderIds: new Set(),
+    staffIds: new Set(),
+    partyIds: new Set(),
+  });
+  const cloudSettledRef = useRef(false);
+
+  const setAutoSyncEnabled = useCallback((enabled: boolean) => {
+    setAutoSyncEnabledState(enabled);
+    localStorage.setItem(AUTO_SYNC_KEY, enabled ? 'true' : 'false');
+  }, []);
+
+  const markLocalMutation = useCallback(() => {
+    setLocalMutationSeq((n) => n + 1);
+  }, []);
 
   const notify = useCallback((text: string, tone: 'success' | 'error' | 'info' = 'success') => {
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -197,6 +281,192 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => unsub();
   }, []);
 
+  // Real-time Firestore subscription when signed in
+  useEffect(() => {
+    if (!authReady || !firebaseUser) {
+      setLiveSyncActive(false);
+      cloudSettledRef.current = false;
+      return;
+    }
+
+    const emptyKnown: CloudKnownState = {
+      workspaceExists: false,
+      profileExists: false,
+      inventoryIds: new Set(),
+      purchaseIds: new Set(),
+      saleDispatchMap: new Map(),
+      returnIds: new Set(),
+      paymentIds: new Set(),
+      reminderIds: new Set(),
+      staffIds: new Set(),
+      partyIds: new Set(),
+    };
+    knownCloudStateRef.current = emptyKnown;
+    cloudSettledRef.current = false;
+
+    const unsub = subscribeToWorkspace(firebaseUser.uid, {
+      knownState: emptyKnown,
+      onProfile: (profile) => {
+        setState((prev) => ({ ...prev, profile: { ...prev.profile, ...profile } }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onInventory: (inventory) => {
+        setState((prev) => ({ ...prev, inventory }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onPurchases: (purchases) => {
+        setState((prev) => ({ ...prev, purchases }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onSales: (sales) => {
+        setState((prev) => ({ ...prev, sales }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onReturns: (returns) => {
+        setState((prev) => ({ ...prev, returns }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onPayments: (payments) => {
+        setState((prev) => ({ ...prev, payments }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onReminders: (reminders) => {
+        setState((prev) => ({ ...prev, reminders }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onStaff: (staff) => {
+        setState((prev) => ({
+          ...prev,
+          staff,
+          activeStaffId: staff.some((s) => s.id === prev.activeStaffId)
+            ? prev.activeStaffId
+            : staff[0]?.id || prev.activeStaffId,
+        }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onParties: (parties) => {
+        setState((prev) => ({ ...prev, parties }));
+        setLastSyncedAt(new Date().toLocaleTimeString());
+      },
+      onInitialSyncCheck: (isWorkspaceEmpty) => {
+        cloudSettledRef.current = true;
+        setLiveSyncActive(true);
+        if (isWorkspaceEmpty && autoSyncEnabled) {
+          const cur = stateRef.current;
+          setIsSyncing(true);
+          pushWorkspaceToCloud(
+            firebaseUser.uid,
+            {
+              profile: cur.profile,
+              inventory: cur.inventory,
+              purchases: cur.purchases,
+              sales: cur.sales,
+              returns: cur.returns,
+              payments: cur.payments,
+              reminders: cur.reminders,
+              staff: cur.staff,
+              parties: cur.parties,
+            },
+            knownCloudStateRef.current
+          )
+            .then(() => {
+              setLastSyncedAt(new Date().toLocaleTimeString());
+              setPendingOfflineSync(false);
+            })
+            .catch(() => {
+              setPendingOfflineSync(true);
+            })
+            .finally(() => setIsSyncing(false));
+        }
+      },
+      onError: () => {
+        setLiveSyncActive(false);
+      },
+    });
+
+    return () => {
+      unsub();
+      setLiveSyncActive(false);
+      cloudSettledRef.current = false;
+    };
+  }, [authReady, firebaseUser, autoSyncEnabled]);
+
+  // Automatic debounced Cloud Push whenever local mutations occur
+  useEffect(() => {
+    if (localMutationSeq === 0 || !firebaseUser || !autoSyncEnabled) return;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setPendingOfflineSync(true);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (!cloudSettledRef.current) {
+        setPendingOfflineSync(true);
+        return;
+      }
+      const cur = stateRef.current;
+      setIsSyncing(true);
+      pushWorkspaceToCloud(
+        firebaseUser.uid,
+        {
+          profile: cur.profile,
+          inventory: cur.inventory,
+          purchases: cur.purchases,
+          sales: cur.sales,
+          returns: cur.returns,
+          payments: cur.payments,
+          reminders: cur.reminders,
+          staff: cur.staff,
+          parties: cur.parties,
+        },
+        knownCloudStateRef.current
+      )
+        .then(() => {
+          setLastSyncedAt(new Date().toLocaleTimeString());
+          setPendingOfflineSync(false);
+        })
+        .catch(() => {
+          setPendingOfflineSync(true);
+        })
+        .finally(() => setIsSyncing(false));
+    }, 650);
+
+    return () => clearTimeout(timer);
+  }, [localMutationSeq, firebaseUser, autoSyncEnabled]);
+
+  // Auto-flush queued offline changes when device returns online
+  useEffect(() => {
+    const handleOnline = () => {
+      if (!firebaseUser || !autoSyncEnabled || !pendingOfflineSync) return;
+      const cur = stateRef.current;
+      setIsSyncing(true);
+      pushWorkspaceToCloud(firebaseUser.uid, {
+        profile: cur.profile,
+        inventory: cur.inventory,
+        purchases: cur.purchases,
+        sales: cur.sales,
+        returns: cur.returns,
+        payments: cur.payments,
+        reminders: cur.reminders,
+        staff: cur.staff,
+        parties: cur.parties,
+      })
+        .then(() => {
+          setLastSyncedAt(new Date().toLocaleTimeString());
+          setPendingOfflineSync(false);
+          notify('Offline edits automatically synced to all devices.');
+        })
+        .catch(() => {
+          setPendingOfflineSync(true);
+        })
+        .finally(() => setIsSyncing(false));
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => window.removeEventListener('online', handleOnline);
+  }, [firebaseUser, autoSyncEnabled, pendingOfflineSync, notify]);
+
   const toggleTheme = useCallback(() => {
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
   }, []);
@@ -231,9 +501,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         profile: { ...prev.profile, ...next },
       }));
-      notify('Business profile & exchange rates saved locally.');
+      markLocalMutation();
+      notify('Business profile & exchange rates saved.');
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const addInventoryItem = useCallback(
@@ -249,10 +520,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         inventory: [created, ...prev.inventory],
       }));
+      markLocalMutation();
       notify(`Added ${created.name} (${created.sku}) to inventory.`);
       return created;
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const updateInventoryItem = useCallback(
@@ -263,9 +535,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item
         ),
       }));
+      markLocalMutation();
       notify('Inventory item updated.');
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deleteInventoryItem = useCallback(
@@ -335,10 +608,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: nextPayments,
         };
       });
+      markLocalMutation();
       notify(`Purchase ${created.referenceNo} saved and stock updated.`);
       return created;
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const payPurchaseBalance = useCallback(
@@ -378,9 +652,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: [payRec, ...prev.payments],
         };
       });
+      markLocalMutation();
       notify('Supplier payment recorded.');
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deletePurchase = useCallback(
@@ -412,15 +687,18 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (firebaseUser) {
         void deleteCloudDocument(firebaseUser.uid, 'purchases', id).catch(() => {});
       }
+      markLocalMutation();
       notify('Purchase record deleted & linked stock adjusted.', 'info');
     },
-    [firebaseUser, notify]
+    [firebaseUser, markLocalMutation, notify]
   );
 
   const addSale = useCallback(
     (sale: Omit<SalesOrder, 'id' | 'createdAt'>): SalesOrder => {
       const created: SalesOrder = {
         ...sale,
+        courierCharges: sale.courierCharges ?? 0,
+        dispatchStatus: sale.dispatchStatus || 'Pending',
         id: `sale-${Date.now()}`,
         createdAt: new Date().toISOString(),
       };
@@ -443,13 +721,15 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           const activeRate =
             created.finalCurrency === 'PKR'
               ? 1
-              : created.sourceCurrency === 'RMB'
-                ? prev.profile.rmbToPkr || 1
-                : prev.profile.usdToPkr || 1;
+              : created.exchangeRateApplied > 0
+                ? created.exchangeRateApplied
+                : getRateForCurrency(created.finalCurrency, prev.profile);
           const origAmt =
             created.finalCurrency === 'PKR'
               ? created.paidAmountPkr
-              : Number((created.paidAmountPkr / activeRate).toFixed(2));
+              : activeRate > 0
+                ? Number((created.paidAmountPkr / activeRate).toFixed(2))
+                : created.finalTotal;
 
           nextPayments.unshift({
             id: `pay-${Date.now()}`,
@@ -475,10 +755,120 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: nextPayments,
         };
       });
+      markLocalMutation();
       notify(`Invoice ${created.invoiceNo} created & stock updated.`);
       return created;
     },
-    [notify]
+    [markLocalMutation, notify]
+  );
+
+  const openSaleForEdit = useCallback(
+    (saleId: string) => {
+      const target = state.sales.find((s) => s.id === saleId);
+      if (!target) {
+        notify('Invoice not found.', 'error');
+        return;
+      }
+      if (target.dispatchStatus === 'Dispatched') {
+        notify(`Invoice ${target.invoiceNo} is already dispatched and locked from editing.`, 'error');
+        return;
+      }
+      setQueuedEditSaleId(saleId);
+      setActiveModule('sales');
+    },
+    [state.sales, notify]
+  );
+
+  const updateSale = useCallback(
+    (saleId: string, updated: Omit<SalesOrder, 'id' | 'createdAt'>): SalesOrder | null => {
+      const existing = state.sales.find((s) => s.id === saleId);
+      if (!existing) {
+        notify('Invoice not found for update.', 'error');
+        return null;
+      }
+      if (existing.dispatchStatus === 'Dispatched') {
+        notify(`Invoice ${existing.invoiceNo} is dispatched and cannot be edited.`, 'error');
+        return null;
+      }
+
+      const savedOrder: SalesOrder = {
+        ...existing,
+        ...updated,
+        id: existing.id,
+        createdAt: existing.createdAt,
+        courierCharges: updated.courierCharges ?? 0,
+        dispatchStatus: existing.dispatchStatus || 'Pending',
+      };
+
+      setState((prev) => {
+        const currentExisting = prev.sales.find((s) => s.id === saleId);
+        if (!currentExisting || currentExisting.dispatchStatus === 'Dispatched') return prev;
+
+        // Reconcile inventory: restore old sold quantities and deduct updated quantities
+        const nextInventory = prev.inventory.map((inv) => {
+          const oldQty = currentExisting.items
+            .filter(
+              (li) => li.inventoryId === inv.id || li.sku.toLowerCase() === inv.sku.toLowerCase()
+            )
+            .reduce((sum, li) => sum + li.quantity, 0);
+          const newQty = savedOrder.items
+            .filter(
+              (li) => li.inventoryId === inv.id || li.sku.toLowerCase() === inv.sku.toLowerCase()
+            )
+            .reduce((sum, li) => sum + li.quantity, 0);
+          if (oldQty === 0 && newQty === 0) return inv;
+          return {
+            ...inv,
+            stockQty: Math.max(0, inv.stockQty + oldQty - newQty),
+            updatedAt: new Date().toISOString(),
+          };
+        });
+
+        return {
+          ...prev,
+          sales: prev.sales.map((s) => (s.id === saleId ? savedOrder : s)),
+          inventory: nextInventory,
+        };
+      });
+
+      markLocalMutation();
+      notify(`Invoice ${savedOrder.invoiceNo} updated & stock reconciled.`);
+      return savedOrder;
+    },
+    [state.sales, markLocalMutation, notify]
+  );
+
+  const dispatchSale = useCallback(
+    (saleId: string, expectedArrivalDate: string) => {
+      const target = state.sales.find((s) => s.id === saleId);
+      if (!target) {
+        notify('Invoice not found.', 'error');
+        return;
+      }
+      if (target.dispatchStatus === 'Dispatched') {
+        notify(`Invoice ${target.invoiceNo} is already dispatched.`, 'info');
+        return;
+      }
+      const dispatchedAt = new Date().toISOString();
+      setState((prev) => ({
+        ...prev,
+        sales: prev.sales.map((s) =>
+          s.id === saleId
+            ? {
+                ...s,
+                dispatchStatus: 'Dispatched',
+                expectedArrivalDate,
+                dispatchedAt,
+              }
+            : s
+        ),
+      }));
+      markLocalMutation();
+      notify(
+        `Invoice ${target.invoiceNo} dispatched (Arriving ${expectedArrivalDate}) & locked from edits.`
+      );
+    },
+    [state.sales, markLocalMutation, notify]
   );
 
   const recordSalePayment = useCallback(
@@ -515,9 +905,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: [paymentRec, ...prev.payments],
         };
       });
+      markLocalMutation();
       notify('Customer payment recorded.');
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deleteSale = useCallback(
@@ -549,9 +940,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (firebaseUser) {
         void deleteCloudDocument(firebaseUser.uid, 'sales', id).catch(() => {});
       }
+      markLocalMutation();
       notify('Sales invoice deleted & sold stock restored.', 'info');
     },
-    [firebaseUser, notify]
+    [firebaseUser, markLocalMutation, notify]
   );
 
   const addReturn = useCallback(
@@ -611,10 +1003,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: [refundPayment, ...prev.payments],
         };
       });
+      markLocalMutation();
       notify(`Return ${created.returnNo} processed.`);
       return created;
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deleteReturn = useCallback(
@@ -656,9 +1049,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (firebaseUser) {
         void deleteCloudDocument(firebaseUser.uid, 'returns', id).catch(() => {});
       }
+      markLocalMutation();
       notify('Return record deleted.', 'info');
     },
-    [firebaseUser, notify]
+    [firebaseUser, markLocalMutation, notify]
   );
 
   const addPayment = useCallback(
@@ -672,10 +1066,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         payments: [created, ...prev.payments],
       }));
+      markLocalMutation();
       notify(`${created.type} payment recorded.`);
       return created;
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deletePayment = useCallback(
@@ -692,13 +1087,17 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [firebaseUser, notify]
   );
 
-  const addReminderLog = useCallback((log: Omit<ReminderLog, 'id'>) => {
-    const created: ReminderLog = { ...log, id: `rem-${Date.now()}` };
-    setState((prev) => ({
-      ...prev,
-      reminders: [created, ...prev.reminders],
-    }));
-  }, []);
+  const addReminderLog = useCallback(
+    (log: Omit<ReminderLog, 'id'>) => {
+      const created: ReminderLog = { ...log, id: `rem-${Date.now()}` };
+      setState((prev) => ({
+        ...prev,
+        reminders: [created, ...prev.reminders],
+      }));
+      markLocalMutation();
+    },
+    [markLocalMutation]
+  );
 
   const deleteReminderLog = useCallback(
     (id: string) => {
@@ -736,9 +1135,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         staff: [...prev.staff, created],
       }));
+      markLocalMutation();
       notify(`User account created for ${created.name}.`);
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const updateStaffAccount = useCallback(
@@ -747,9 +1147,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ...prev,
         staff: prev.staff.map((u) => (u.id === id ? { ...u, ...patch } : u)),
       }));
+      markLocalMutation();
       notify('User permissions updated.');
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const deleteStaffAccount = useCallback(
@@ -770,6 +1171,54 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         void deleteCloudDocument(firebaseUser.uid, 'staff', id).catch(() => {});
       }
       notify('Staff account deleted.', 'info');
+    },
+    [firebaseUser, notify]
+  );
+
+  const addParty = useCallback(
+    (party: Omit<PartyAccount, 'id' | 'createdAt' | 'updatedAt'>): PartyAccount => {
+      const now = new Date().toISOString();
+      const created: PartyAccount = {
+        ...party,
+        id: `pty-${Date.now()}`,
+        createdAt: now,
+        updatedAt: now,
+      };
+      setState((prev) => ({
+        ...prev,
+        parties: [created, ...prev.parties],
+      }));
+      markLocalMutation();
+      notify(`${created.partyType} profile "${created.name}" saved.`);
+      return created;
+    },
+    [markLocalMutation, notify]
+  );
+
+  const updateParty = useCallback(
+    (id: string, patch: Partial<Omit<PartyAccount, 'id' | 'createdAt'>>) => {
+      setState((prev) => ({
+        ...prev,
+        parties: prev.parties.map((p) =>
+          p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p
+        ),
+      }));
+      markLocalMutation();
+      notify('Customer / vendor profile updated.');
+    },
+    [markLocalMutation, notify]
+  );
+
+  const deleteParty = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        parties: prev.parties.filter((p) => p.id !== id),
+      }));
+      if (firebaseUser) {
+        void deleteCloudDocument(firebaseUser.uid, 'parties', id).catch(() => {});
+      }
+      notify('Customer / vendor profile deleted.', 'info');
     },
     [firebaseUser, notify]
   );
@@ -795,14 +1244,15 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setState((prev) => ({
           ...prev,
           ...parsed,
-          profile: { ...INITIAL_PROFILE, ...parsed.profile },
+          profile: normalizeProfile(parsed.profile),
         }));
+        markLocalMutation();
         notify('Backup restored successfully.');
       } catch (err) {
         notify(err instanceof Error ? err.message : 'Failed to parse backup JSON.', 'error');
       }
     },
-    [notify]
+    [markLocalMutation, notify]
   );
 
   const resetDemoData = useCallback(() => {
@@ -816,10 +1266,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       reminders: INITIAL_REMINDERS,
       reminderSettings: INITIAL_REMINDER_SETTINGS,
       staff: INITIAL_STAFF,
+      parties: INITIAL_PARTIES,
       activeStaffId: INITIAL_STAFF[0].id,
     });
+    markLocalMutation();
     notify('Sample N.A GEM\'S catalog restored.', 'info');
-  }, [notify]);
+  }, [markLocalMutation, notify]);
 
   const cloudSignIn = useCallback(async () => {
     try {
@@ -842,17 +1294,23 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     setIsSyncing(true);
     try {
-      const count = await pushWorkspaceToCloud(firebaseUser.uid, {
-        profile: state.profile,
-        inventory: state.inventory,
-        purchases: state.purchases,
-        sales: state.sales,
-        returns: state.returns,
-        payments: state.payments,
-        reminders: state.reminders,
-        staff: state.staff,
-      });
+      const count = await pushWorkspaceToCloud(
+        firebaseUser.uid,
+        {
+          profile: state.profile,
+          inventory: state.inventory,
+          purchases: state.purchases,
+          sales: state.sales,
+          returns: state.returns,
+          payments: state.payments,
+          reminders: state.reminders,
+          staff: state.staff,
+          parties: state.parties,
+        },
+        knownCloudStateRef.current
+      );
       setLastSyncedAt(new Date().toLocaleTimeString());
+      setPendingOfflineSync(false);
       notify(`Cloud Sync complete (${count} records synchronized).`);
     } catch (err) {
       notify(err instanceof Error ? err.message : 'Cloud sync failed.', 'error');
@@ -882,6 +1340,7 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           payments: data.payments && data.payments.length > 0 ? data.payments : prev.payments,
           reminders: data.reminders && data.reminders.length > 0 ? data.reminders : prev.reminders,
           staff: data.staff && data.staff.length > 0 ? data.staff : prev.staff,
+          parties: data.parties && data.parties.length > 0 ? data.parties : prev.parties,
         }));
         setLastSyncedAt(new Date().toLocaleTimeString());
         notify('Restored full cloud workspace data from Firestore.');
@@ -908,6 +1367,9 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         notify,
         posQueuedSku,
         setPosQueuedSku,
+        queuedEditSaleId,
+        setQueuedEditSaleId,
+        openSaleForEdit,
         updateProfile,
         addInventoryItem,
         updateInventoryItem,
@@ -916,6 +1378,8 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         payPurchaseBalance,
         deletePurchase,
         addSale,
+        updateSale,
+        dispatchSale,
         recordSalePayment,
         deleteSale,
         addReturn,
@@ -928,6 +1392,9 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addStaffAccount,
         updateStaffAccount,
         deleteStaffAccount,
+        addParty,
+        updateParty,
+        deleteParty,
         exportBackupJson,
         importBackupJson,
         resetDemoData,
@@ -935,6 +1402,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         authReady,
         isSyncing,
         lastSyncedAt,
+        autoSyncEnabled,
+        setAutoSyncEnabled,
+        liveSyncActive,
+        pendingOfflineSync,
         cloudSignIn,
         cloudSignOut,
         syncNowToCloud,

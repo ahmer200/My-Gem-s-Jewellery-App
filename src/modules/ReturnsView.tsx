@@ -2,22 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode, ReturnLineItem } from '../types/business';
-import { convertToPkr, formatMoney, getRateForCurrency } from '../utils/currency';
+import {
+  convertAmountBetweenCurrencies,
+  formatMoney,
+  getRateForCurrency,
+} from '../utils/currency';
 import { DeleteActionButton } from '../components/DeleteActionButton';
-
-function convertAmountBetween(
-  amount: number,
-  fromCur: CurrencyCode,
-  toCur: CurrencyCode,
-  rmbRate: number,
-  usdRate: number
-): number {
-  if (fromCur === toCur) return Number(amount.toFixed(2));
-  const pkr = convertToPkr(amount, fromCur, rmbRate || 1, usdRate || 1);
-  if (toCur === 'PKR') return Number(pkr.toFixed(2));
-  const targetRate = toCur === 'RMB' ? rmbRate || 1 : usdRate || 1;
-  return Number((targetRate > 0 ? pkr / targetRate : pkr).toFixed(2));
-}
+import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
 
 export const ReturnsView: React.FC = () => {
   const {
@@ -37,22 +28,34 @@ export const ReturnsView: React.FC = () => {
   const initialRate =
     initialCurrency === 'PKR'
       ? 1
-      : initialSale && initialSale.exchangeRateApplied > 0
+      : initialSale && initialSale.exchangeRateApplied >= 0
         ? initialSale.exchangeRateApplied
-        : getRateForCurrency(initialCurrency, profile.rmbToPkr, profile.usdToPkr);
+        : getRateForCurrency(initialCurrency, profile);
 
   const [selectedInvoiceNo, setSelectedInvoiceNo] = useState(initialSale?.invoiceNo || '');
   const [customerName, setCustomerName] = useState(initialSale?.customerName || '');
   const [selectedInvId, setSelectedInvId] = useState(inventory[0]?.id || '');
   const [returnItems, setReturnItems] = useState<ReturnLineItem[]>(() => {
     if (initialSale && initialSale.items.length > 0) {
+      const fromRate =
+        initialSale.sourceCurrency === 'PKR'
+          ? 1
+          : initialSale.exchangeRateApplied > 0
+            ? initialSale.exchangeRateApplied
+            : getRateForCurrency(initialSale.sourceCurrency, profile);
+      const toRate =
+        initialSale.finalCurrency === 'PKR'
+          ? 1
+          : initialSale.exchangeRateApplied > 0
+            ? initialSale.exchangeRateApplied
+            : getRateForCurrency(initialSale.finalCurrency, profile);
       return initialSale.items.map((item) => {
-        const unitInFinal = convertAmountBetween(
+        const unitInFinal = convertAmountBetweenCurrencies(
           item.unitPriceOrig,
           initialSale.sourceCurrency,
           initialSale.finalCurrency,
-          initialSale.rmbRateUsed || profile.rmbToPkr,
-          initialSale.usdRateUsed || profile.usdToPkr
+          fromRate,
+          toRate
         );
         return {
           inventoryId: item.inventoryId,
@@ -68,18 +71,19 @@ export const ReturnsView: React.FC = () => {
       });
     }
     if (inventory[0]) {
+      const invRate = getRateForCurrency(inventory[0].sellCurrency, profile);
       return [
         {
           inventoryId: inventory[0].id,
           sku: inventory[0].sku,
           productName: inventory[0].name,
           quantity: 1,
-          unitPriceOrig: convertAmountBetween(
+          unitPriceOrig: convertAmountBetweenCurrencies(
             inventory[0].baseSellPrice,
             inventory[0].sellCurrency,
             'PKR',
-            profile.rmbToPkr,
-            profile.usdToPkr
+            invRate,
+            1
           ),
           percentAdjustment: profile.defaultMarkupPercent,
         },
@@ -121,21 +125,33 @@ export const ReturnsView: React.FC = () => {
       const rate =
         sale.finalCurrency === 'PKR'
           ? 1
-          : sale.exchangeRateApplied > 0
+          : typeof sale.exchangeRateApplied === 'number'
             ? sale.exchangeRateApplied
-            : getRateForCurrency(sale.finalCurrency, profile.rmbToPkr, profile.usdToPkr);
+            : getRateForCurrency(sale.finalCurrency, profile);
       setCustomRate(String(rate));
       setManualTotalOverride(null);
 
       if (sale.items.length > 0) {
+        const fromRate =
+          sale.sourceCurrency === 'PKR'
+            ? 1
+            : sale.exchangeRateApplied > 0
+              ? sale.exchangeRateApplied
+              : getRateForCurrency(sale.sourceCurrency, profile);
+        const toRate =
+          sale.finalCurrency === 'PKR'
+            ? 1
+            : sale.exchangeRateApplied > 0
+              ? sale.exchangeRateApplied
+              : getRateForCurrency(sale.finalCurrency, profile);
         setReturnItems(
           sale.items.map((item) => {
-            const unitInFinal = convertAmountBetween(
+            const unitInFinal = convertAmountBetweenCurrencies(
               item.unitPriceOrig,
               sale.sourceCurrency,
               sale.finalCurrency,
-              sale.rmbRateUsed || profile.rmbToPkr,
-              sale.usdRateUsed || profile.usdToPkr
+              fromRate,
+              toRate
             );
             return {
               inventoryId: item.inventoryId,
@@ -157,20 +173,23 @@ export const ReturnsView: React.FC = () => {
 
   const handleCurrencyChange = (cur: CurrencyCode) => {
     const oldCur = refundCurrency;
-    const oldRate = oldCur === 'PKR' ? 1 : Number(customRate) || getRateForCurrency(oldCur, profile.rmbToPkr, profile.usdToPkr);
-    const nextRate = getRateForCurrency(cur, profile.rmbToPkr, profile.usdToPkr);
-    const rmbForConv = oldCur === 'RMB' ? oldRate : cur === 'RMB' ? nextRate : profile.rmbToPkr;
-    const usdForConv = oldCur === 'USD' ? oldRate : cur === 'USD' ? nextRate : profile.usdToPkr;
+    const oldRate =
+      oldCur === 'PKR'
+        ? 1
+        : Number(customRate) > 0
+          ? Number(customRate)
+          : getRateForCurrency(oldCur, profile);
+    const nextRate = getRateForCurrency(cur, profile);
 
     setReturnItems((prev) =>
       prev.map((ri) => ({
         ...ri,
-        unitPriceOrig: convertAmountBetween(
+        unitPriceOrig: convertAmountBetweenCurrencies(
           ri.unitPriceOrig,
           oldCur,
           cur,
-          rmbForConv,
-          usdForConv
+          oldRate,
+          nextRate
         ),
       }))
     );
@@ -183,12 +202,24 @@ export const ReturnsView: React.FC = () => {
     const item = inventory.find((i) => i.id === selectedInvId);
     if (!item) return;
 
-    const unitOrig = convertAmountBetween(
+    const fromRate =
+      item.sellCurrency === 'PKR'
+        ? 1
+        : typeof item.sellExchangeRate === 'number' && item.sellExchangeRate > 0
+          ? item.sellExchangeRate
+          : getRateForCurrency(item.sellCurrency, profile);
+    const toRate =
+      refundCurrency === 'PKR'
+        ? 1
+        : Number(customRate) > 0
+          ? Number(customRate)
+          : getRateForCurrency(refundCurrency, profile);
+    const unitOrig = convertAmountBetweenCurrencies(
       item.baseSellPrice,
       item.sellCurrency,
       refundCurrency,
-      refundCurrency === 'RMB' ? Number(customRate) || profile.rmbToPkr : profile.rmbToPkr,
-      refundCurrency === 'USD' ? Number(customRate) || profile.usdToPkr : profile.usdToPkr
+      fromRate,
+      toRate
     );
 
     setReturnItems((prev) => {
@@ -213,8 +244,12 @@ export const ReturnsView: React.FC = () => {
   };
 
   const activeRate = refundCurrency === 'PKR' ? 1 : Math.max(0, Number(customRate) || 0);
+  const isOriginalCurrencyMode = refundCurrency !== 'PKR' && activeRate === 0;
   const refundAmountPkr = useMemo(
-    () => (refundCurrency === 'PKR' ? refundAmountOrig : refundAmountOrig * activeRate),
+    () =>
+      refundCurrency === 'PKR' || activeRate === 0
+        ? refundAmountOrig
+        : refundAmountOrig * activeRate,
     [refundCurrency, refundAmountOrig, activeRate]
   );
 
@@ -262,7 +297,7 @@ export const ReturnsView: React.FC = () => {
           Returns & Currency Refund Management
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Process gemstone or jewelry returns with per-item percentage adjustments (+markup / -restocking %), vault restocking, and RMB / USD / PKR conversion
+          Process gemstone or jewelry returns with per-item percentage adjustments, vault restocking, and world currency conversion (Rate = 0 keeps refund in selected currency)
         </p>
       </div>
 
@@ -310,15 +345,10 @@ export const ReturnsView: React.FC = () => {
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                 Refund Currency
               </label>
-              <select
+              <WorldCurrencySelect
                 value={refundCurrency}
-                onChange={(e) => handleCurrencyChange(e.target.value as CurrencyCode)}
-                className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 font-mono font-semibold"
-              >
-                <option value="PKR">PKR</option>
-                <option value="RMB">RMB</option>
-                <option value="USD">USD</option>
-              </select>
+                onChange={handleCurrencyChange}
+              />
             </div>
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -463,11 +493,12 @@ export const ReturnsView: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                Exchange Rate → PKR
+                Exchange Rate → PKR (0 = Keep in {refundCurrency})
               </label>
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 disabled={refundCurrency === 'PKR'}
                 value={refundCurrency === 'PKR' ? '1' : customRate}
                 onChange={(e) => setCustomRate(e.target.value)}
@@ -489,10 +520,10 @@ export const ReturnsView: React.FC = () => {
             </div>
             <div>
               <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
-                PKR Refund Equivalent
+                {isOriginalCurrencyMode ? `Final Refund (${refundCurrency})` : 'PKR Refund Equivalent'}
               </label>
               <div className="w-full rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 font-mono font-bold text-amber-800 dark:text-amber-300">
-                {formatMoney(refundAmountPkr, 'PKR')}
+                {formatMoney(refundAmountPkr, isOriginalCurrencyMode ? refundCurrency : 'PKR')}
               </div>
             </div>
           </div>
@@ -583,10 +614,16 @@ export const ReturnsView: React.FC = () => {
                     {ret.restocked ? 'Yes (+Stock)' : 'No'}
                   </td>
                   <td className="py-3 px-4 text-right font-mono whitespace-nowrap">
-                    {formatMoney(ret.refundAmountOrig, ret.refundCurrency)} (@{ret.exchangeRateApplied})
+                    {formatMoney(ret.refundAmountOrig, ret.refundCurrency)} (
+                    {ret.refundCurrency !== 'PKR' && ret.exchangeRateApplied === 0
+                      ? 'Rate=0 Orig'
+                      : `@${ret.exchangeRateApplied}`}
+                    )
                   </td>
                   <td className="py-3 px-4 text-right font-mono font-bold text-amber-700 dark:text-amber-400 whitespace-nowrap">
-                    {formatMoney(ret.refundAmountPkr, 'PKR')}
+                    {ret.refundCurrency !== 'PKR' && ret.exchangeRateApplied === 0
+                      ? formatMoney(ret.refundAmountOrig, ret.refundCurrency)
+                      : formatMoney(ret.refundAmountPkr, 'PKR')}
                   </td>
                   <td className="py-3 px-4 text-right whitespace-nowrap">
                     {canProcess && (

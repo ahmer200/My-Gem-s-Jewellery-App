@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Download, WifiOff } from 'lucide-react';
+import { Download, RefreshCw, WifiOff } from 'lucide-react';
 import { useOnlineStatus, usePWAInstall } from '../hooks/usePWAInstall';
+import { useAppUpdater } from '../hooks/useAppUpdater';
 
 export const PWAInstallButton: React.FC = () => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
@@ -55,6 +56,24 @@ export const PWAInstallButton: React.FC = () => {
   }
 
   return null;
+};
+
+export const AppUpdateBanner: React.FC = () => {
+  const { hasUpdate, applyUpdate } = useAppUpdater();
+  if (!hasUpdate) return null;
+
+  return (
+    <div className="no-print fixed bottom-20 md:bottom-4 right-4 z-50 flex items-center gap-3 rounded-lg bg-emerald-800 px-3.5 py-2.5 text-xs font-medium text-white shadow-xl border border-emerald-600">
+      <span>New version ready</span>
+      <button
+        onClick={applyUpdate}
+        className="flex items-center gap-1 rounded-md bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-900 hover:bg-emerald-50"
+      >
+        <RefreshCw className="w-3 h-3" />
+        Update Now
+      </button>
+    </div>
+  );
 };
 
 export const OfflineIndicator: React.FC = () => {
