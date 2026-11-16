@@ -62,16 +62,34 @@ export const ReportsView: React.FC = () => {
 
     if (activeTab === 'stock') {
       const headers = [
-        'SKU',
-        'Product Name',
-        'Stock Qty',
-        'Cost Currency',
-        'Cost Rate',
-        'Sell Currency',
-        'Sell Rate',
-        'Markup %',
-        'Base Sell Price',
-        'Final Retail Value',
+        '1. SKU',
+        '2. Size (mm)',
+        '3. Colour',
+        '4. Shape',
+        '5. Sub-Category',
+        '6. Category',
+        '7. Stock Pieces',
+        '8. Item Unit',
+        '9. 1TP Weight',
+        '10. Batch #',
+        '11. Stock Quantity',
+        '12. Cent',
+        '13. Fridge',
+        '14. Cost',
+        '15. Price',
+        '16. Via (By Sea/ By Air)',
+        '17. Purchase Date',
+        '18. Return/Loss/Damage',
+        '19. Gemstone',
+        '20. Origin',
+        '21. Clarity',
+        '22. Treatment',
+        '23. Cert Lab',
+        '24. Cert No.',
+        '25. Min Alert',
+        '26. Vault / Box',
+        '27. Supplier/ Carrier',
+        '28. Remarks',
       ];
       const rows = inventory.map((item) => {
         const costRate =
@@ -80,6 +98,13 @@ export const ReportsView: React.FC = () => {
             : typeof item.costExchangeRate === 'number'
               ? item.costExchangeRate
               : getRateForCurrency(item.costCurrency, profile);
+        const costConverted =
+          item.costCurrency !== 'PKR' && costRate === 0
+            ? `${formatMoney(item.unitCost, item.costCurrency)} (Rate 0)`
+            : `${formatMoney(item.unitCost, item.costCurrency)} (${formatMoney(
+                convertToPkr(item.unitCost, item.costCurrency, costRate),
+                'PKR'
+              )})`;
         const sellCalc = computeItemFinalPkr(
           item.baseSellPrice,
           item.sellCurrency,
@@ -88,21 +113,40 @@ export const ReportsView: React.FC = () => {
         );
         return [
           item.sku,
-          item.name,
+          item.sizeMm || '—',
+          item.colour || '—',
+          item.shapeCut || '—',
+          item.subCategory || '—',
+          item.category || '—',
+          item.stockPieces ?? 0,
+          item.itemUnit || 'Carats',
+          item.oneTpWeight ?? item.weightCarats ?? 0,
+          item.batchNumber || '—',
           item.stockQty,
-          item.costCurrency,
-          item.costCurrency !== 'PKR' && costRate === 0 ? `0 (${item.costCurrency})` : costRate,
-          item.sellCurrency,
-          item.sellCurrency !== 'PKR' && sellCalc.rate === 0
-            ? `0 (${item.sellCurrency})`
-            : sellCalc.rate,
-          `${profile.defaultMarkupPercent}%`,
-          formatMoney(item.baseSellPrice, item.sellCurrency),
-          formatMoney(sellCalc.finalDisplayAmount * item.stockQty, sellCalc.finalCurrency),
+          item.cent ?? 0,
+          item.fridge || '—',
+          costConverted,
+          `${formatMoney(sellCalc.finalDisplayAmount, sellCalc.finalCurrency)} (Base: ${formatMoney(
+            item.baseSellPrice,
+            item.sellCurrency
+          )})`,
+          item.via || '—',
+          item.purchaseDate || '—',
+          item.returnLossDamage || '0',
+          item.gemstoneType || '—',
+          item.origin || '—',
+          item.clarity || '—',
+          item.treatment || '—',
+          item.certLab || '—',
+          item.certNumber || '—',
+          item.minStockAlert,
+          item.vaultLocation || '—',
+          item.supplierName || '—',
+          item.notes || '—',
         ];
       });
       return {
-        title: 'Stock Valuation Report',
+        title: 'Stock Report',
         subtitle: `Total SKUs: ${inventory.length} | Default Currency: ${defCur}=${defRate} PKR, Markup=${profile.defaultMarkupPercent}%`,
         headers,
         rows,

@@ -75,9 +75,10 @@ service cloud.firestore {
     function isValidInventoryItem(data) {
       return data.keys().hasAll(['ownerId', 'sku', 'name', 'stockQty', 'costCurrency', 'unitCost', 'sellCurrency', 'baseSellPrice', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
-          'ownerId', 'sku', 'name', 'category', 'gemstoneType', 'origin', 'shapeCut',
-          'colour', 'clarity', 'weightCarats', 'sizeMm', 'treatment', 'certLab',
-          'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
+          'ownerId', 'sku', 'name', 'category', 'subCategory', 'gemstoneType', 'origin', 'shapeCut',
+          'colour', 'clarity', 'weightCarats', 'oneTpWeight', 'cent', 'sizeMm',
+          'stockPieces', 'itemUnit', 'batchNumber', 'fridge', 'via', 'purchaseDate', 'returnLossDamage',
+          'treatment', 'certLab', 'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
           'costCurrency', 'costExchangeRate', 'unitCost', 'sellCurrency', 'sellExchangeRate',
           'baseSellPrice', 'imageUrl', 'notes', 'createdAt', 'updatedAt'
         ])
@@ -86,13 +87,23 @@ service cloud.firestore {
         && data.sku is string && data.sku.size() >= 1 && data.sku.size() <= 64
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 200
         && (!('category' in data) || (data.category is string && data.category.size() <= 80))
+        && (!('subCategory' in data) || (data.subCategory is string && data.subCategory.size() <= 80))
         && (!('gemstoneType' in data) || (data.gemstoneType is string && data.gemstoneType.size() <= 80))
         && (!('origin' in data) || (data.origin is string && data.origin.size() <= 100))
         && (!('shapeCut' in data) || (data.shapeCut is string && data.shapeCut.size() <= 80))
         && (!('colour' in data) || (data.colour is string && data.colour.size() <= 80))
         && (!('clarity' in data) || (data.clarity is string && data.clarity.size() <= 80))
         && (!('weightCarats' in data) || (data.weightCarats is number && data.weightCarats >= 0))
+        && (!('oneTpWeight' in data) || (data.oneTpWeight is number && data.oneTpWeight >= 0))
+        && (!('cent' in data) || (data.cent is number && data.cent >= 0))
         && (!('sizeMm' in data) || (data.sizeMm is string && data.sizeMm.size() <= 60))
+        && (!('stockPieces' in data) || (data.stockPieces is number && data.stockPieces >= 0))
+        && (!('itemUnit' in data) || (data.itemUnit is string && data.itemUnit.size() <= 40))
+        && (!('batchNumber' in data) || (data.batchNumber is string && data.batchNumber.size() <= 64))
+        && (!('fridge' in data) || (data.fridge is string && data.fridge.size() <= 80))
+        && (!('via' in data) || (data.via is string && data.via.size() <= 40))
+        && (!('purchaseDate' in data) || (data.purchaseDate is string && data.purchaseDate.size() <= 40))
+        && (!('returnLossDamage' in data) || (data.returnLossDamage is string && data.returnLossDamage.size() <= 100))
         && (!('treatment' in data) || (data.treatment is string && data.treatment.size() <= 100))
         && (!('certLab' in data) || (data.certLab is string && data.certLab.size() <= 60))
         && (!('certNumber' in data) || (data.certNumber is string && data.certNumber.size() <= 80))
@@ -341,9 +352,10 @@ service cloud.firestore {
           && incoming().createdAt == existing().createdAt
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
-            'sku', 'name', 'category', 'gemstoneType', 'origin', 'shapeCut',
-            'colour', 'clarity', 'weightCarats', 'sizeMm', 'treatment', 'certLab',
-            'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
+            'sku', 'name', 'category', 'subCategory', 'gemstoneType', 'origin', 'shapeCut',
+            'colour', 'clarity', 'weightCarats', 'oneTpWeight', 'cent', 'sizeMm',
+            'stockPieces', 'itemUnit', 'batchNumber', 'fridge', 'via', 'purchaseDate', 'returnLossDamage',
+            'treatment', 'certLab', 'certNumber', 'stockQty', 'minStockAlert', 'vaultLocation', 'supplierName',
             'costCurrency', 'costExchangeRate', 'unitCost', 'sellCurrency', 'sellExchangeRate',
             'baseSellPrice', 'imageUrl', 'notes', 'updatedAt'
           ]);

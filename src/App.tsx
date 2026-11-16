@@ -38,7 +38,7 @@ import { normalizeCurrencyCode } from './utils/worldCurrencies';
 
 const NAV_ITEMS: { id: ModuleId; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', shortLabel: 'Home', icon: LayoutDashboard },
-  { id: 'inventory', label: 'Inventory (22-Col)', shortLabel: 'Stock', icon: Gem },
+  { id: 'inventory', label: 'Inventory', shortLabel: 'Stock', icon: Gem },
   { id: 'sales', label: 'Sales & Invoices', shortLabel: 'Sales', icon: Receipt },
   { id: 'parties', label: 'Customers & Vendors', shortLabel: 'Parties', icon: Contact },
   { id: 'scanner', label: 'QR / Barcode Scan', shortLabel: 'Scan', icon: QrCode },

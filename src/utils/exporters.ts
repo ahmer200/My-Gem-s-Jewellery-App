@@ -22,10 +22,10 @@ export function buildInventoryRows(items: InventoryItem[], profile: CompanyProfi
         : typeof item.costExchangeRate === 'number'
           ? item.costExchangeRate
           : getRateForCurrency(item.costCurrency, profile);
-    const costDisplay =
+    const costConverted =
       item.costCurrency !== 'PKR' && costRate === 0
         ? formatMoney(item.unitCost, item.costCurrency)
-        : Number(convertToPkr(item.unitCost, item.costCurrency, costRate).toFixed(2));
+        : formatMoney(convertToPkr(item.unitCost, item.costCurrency, costRate), 'PKR');
     const sellCalc = computeItemFinalPkr(
       item.baseSellPrice,
       item.sellCurrency,
@@ -33,28 +33,34 @@ export function buildInventoryRows(items: InventoryItem[], profile: CompanyProfi
       item.sellExchangeRate
     );
     return {
-      '1. SKU / Barcode': item.sku,
-      '2. Product Name': item.name,
-      '3. Category': item.category,
-      '4. Gemstone Type': item.gemstoneType,
-      '5. Origin': item.origin,
-      '6. Shape / Cut': item.shapeCut,
-      '7. Colour': item.colour,
-      '8. Clarity': item.clarity,
-      '9. Weight (ct)': item.weightCarats,
-      '10. Size (mm)': item.sizeMm,
-      '11. Treatment': item.treatment,
-      '12. Cert Lab': item.certLab,
-      '13. Cert Number': item.certNumber,
-      '14. Stock Qty': item.stockQty,
-      '15. Min Alert': item.minStockAlert,
-      '16. Box / Vault': item.vaultLocation,
-      '17. Supplier': item.supplierName,
-      '18. Cost Currency': item.costCurrency,
-      '19. Unit Cost (Orig.)': `${item.unitCost.toFixed(2)} ${item.costCurrency} (@${costRate})`,
-      '20. Cost (Converted)': costDisplay,
-      '21. Base Sell Price': `${item.baseSellPrice.toFixed(2)} ${item.sellCurrency}`,
-      '22. Final Price (w/ Markup)': `${sellCalc.finalDisplayAmount.toFixed(2)} ${sellCalc.finalCurrency} (${profile.defaultMarkupPercent}%)`,
+      '1. SKU': item.sku,
+      '2. Size (mm)': item.sizeMm || '—',
+      '3. Colour': item.colour || '—',
+      '4. Shape': item.shapeCut || '—',
+      '5. Sub-Category': item.subCategory || '—',
+      '6. Category': item.category || '—',
+      '7. Stock Pieces': item.stockPieces ?? 0,
+      '8. Item Unit': item.itemUnit || 'Carats',
+      '9. 1TP Weight': item.oneTpWeight ?? item.weightCarats ?? 0,
+      '10. Batch #': item.batchNumber || '—',
+      '11. Stock Quantity': item.stockQty,
+      '12. Cent': item.cent ?? 0,
+      '13. Fridge': item.fridge || '—',
+      '14. Cost': `${formatMoney(item.unitCost, item.costCurrency)} (${costConverted})`,
+      '15. Price': `${formatMoney(sellCalc.finalDisplayAmount, sellCalc.finalCurrency)} (Base: ${formatMoney(item.baseSellPrice, item.sellCurrency)})`,
+      '16. Via (By Sea/ By Air)': item.via || '—',
+      '17. Purchase Date': item.purchaseDate || '—',
+      '18. Return/Loss/Damage': item.returnLossDamage || '0',
+      '19. Gemstone': item.gemstoneType || '—',
+      '20. Origin': item.origin || '—',
+      '21. Clarity': item.clarity || '—',
+      '22. Treatment': item.treatment || '—',
+      '23. Cert Lab': item.certLab || '—',
+      '24. Cert No.': item.certNumber || '—',
+      '25. Min Alert': item.minStockAlert,
+      '26. Vault / Box': item.vaultLocation || '—',
+      '27. Supplier/ Carrier': item.supplierName || '—',
+      '28. Remarks': item.notes || '—',
     };
   });
 }
@@ -63,7 +69,7 @@ export function exportInventoryExcel(items: InventoryItem[], profile: CompanyPro
   const rows = buildInventoryRows(items, profile);
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'Inventory 22-Col');
+  XLSX.utils.book_append_sheet(wb, ws, 'Inventory');
   XLSX.writeFile(wb, `NA_GEMS_Inventory_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
@@ -82,41 +88,47 @@ export function exportInventoryCsv(items: InventoryItem[], profile: CompanyProfi
 
 export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfile) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  doc.setFontSize(14);
-  doc.text(`Aqsa Business Management System — ${profile.companyName}`, 14, 14);
-  doc.setFontSize(9);
+  doc.setFontSize(13);
+  doc.text(`Aqsa Business Management System — ${profile.companyName}`, 10, 12);
+  doc.setFontSize(8.5);
   const defaultCur = profile.defaultCurrency || 'CNY';
   const defaultRate = getRateForCurrency(defaultCur, profile);
   doc.text(
-    `22-Column Inventory Report | Active FX (${defaultCur}→PKR): ${defaultRate} | Markup: ${profile.defaultMarkupPercent}% | Generated: ${new Date().toLocaleDateString()}`,
-    14,
-    20
+    `Inventory & Stock Report | Active FX (${defaultCur}→PKR): ${defaultRate} | Markup: ${profile.defaultMarkupPercent}% | Generated: ${new Date().toLocaleDateString()}`,
+    10,
+    18
   );
 
   const head = [
     [
-      'SKU',
-      'Name',
-      'Category',
-      'Gem',
-      'Origin',
-      'Cut',
-      'Colour',
-      'Clarity',
-      'Wt(ct)',
-      'Size',
-      'Treat.',
-      'Lab',
-      'Cert#',
-      'Qty',
-      'Min',
-      'Vault',
-      'Supplier',
-      'CostCur',
-      'Cost',
-      'SellCur',
-      'BaseSell',
-      'Final PKR',
+      '1.SKU',
+      '2.Size',
+      '3.Colour',
+      '4.Shape',
+      '5.Sub-Cat',
+      '6.Category',
+      '7.Pcs',
+      '8.Unit',
+      '9.1TP Wt',
+      '10.Batch#',
+      '11.Qty',
+      '12.Cent',
+      '13.Fridge',
+      '14.Cost',
+      '15.Price',
+      '16.Via',
+      '17.PurDate',
+      '18.Ret/Dmg',
+      '19.Gem',
+      '20.Origin',
+      '21.Clarity',
+      '22.Treat',
+      '23.Lab',
+      '24.Cert#',
+      '25.Min',
+      '26.Vault',
+      '27.Supplier',
+      '28.Remarks',
     ],
   ];
 
@@ -124,39 +136,46 @@ export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfi
     const sellCalc = computeItemFinalPkr(i.baseSellPrice, i.sellCurrency, profile, i.sellExchangeRate);
     return [
       i.sku,
-      i.name,
-      i.category,
-      i.gemstoneType,
-      i.origin,
-      i.shapeCut,
-      i.colour,
-      i.clarity,
-      i.weightCarats.toFixed(2),
-      i.sizeMm,
-      i.treatment,
-      i.certLab,
-      i.certNumber,
+      i.sizeMm || '—',
+      i.colour || '—',
+      i.shapeCut || '—',
+      i.subCategory || '—',
+      i.category || '—',
+      String(i.stockPieces ?? 0),
+      i.itemUnit || '—',
+      String(i.oneTpWeight ?? i.weightCarats ?? 0),
+      i.batchNumber || '—',
       String(i.stockQty),
-      String(i.minStockAlert),
-      i.vaultLocation,
-      i.supplierName,
-      i.costCurrency,
-      `${i.unitCost}`,
-      i.sellCurrency,
-      `${i.baseSellPrice}`,
+      String(i.cent ?? 0),
+      i.fridge || '—',
+      `${i.unitCost} ${i.costCurrency}`,
       `${sellCalc.finalDisplayAmount.toFixed(0)} ${sellCalc.finalCurrency}`,
+      i.via || '—',
+      i.purchaseDate || '—',
+      i.returnLossDamage || '0',
+      i.gemstoneType || '—',
+      i.origin || '—',
+      i.clarity || '—',
+      i.treatment || '—',
+      i.certLab || '—',
+      i.certNumber || '—',
+      String(i.minStockAlert),
+      i.vaultLocation || '—',
+      i.supplierName || '—',
+      i.notes || '—',
     ];
   });
 
   autoTable(doc, {
     head,
     body,
-    startY: 25,
-    styles: { fontSize: 5.8, cellPadding: 1.2 },
-    headStyles: { fillColor: [6, 78, 59], textColor: 255 },
+    startY: 22,
+    margin: { left: 8, right: 8 },
+    styles: { fontSize: 4.8, cellPadding: 0.9, overflow: 'linebreak' },
+    headStyles: { fillColor: [6, 78, 59], textColor: 255, fontSize: 4.8 },
   });
 
-  doc.save(`NA_GEMS_Inventory_22Col_${new Date().toISOString().slice(0, 10)}.pdf`);
+  doc.save(`NA_GEMS_Inventory_28Col_${new Date().toISOString().slice(0, 10)}.pdf`);
 }
 
 export function buildInvoicePdfDoc(
@@ -343,12 +362,18 @@ export function exportGenericReportPdf(
     25
   );
 
+  const isWide = headers.length > 18;
   autoTable(doc, {
     startY: 30,
     head: [headers],
     body: rows.map((r) => r.map((c) => String(c))),
-    styles: { fontSize: 7.5, cellPadding: 2 },
-    headStyles: { fillColor: [6, 78, 59], textColor: 255 },
+    margin: isWide ? { left: 8, right: 8 } : undefined,
+    styles: {
+      fontSize: isWide ? 4.8 : 7.5,
+      cellPadding: isWide ? 0.9 : 2,
+      overflow: 'linebreak',
+    },
+    headStyles: { fillColor: [6, 78, 59], textColor: 255, fontSize: isWide ? 4.8 : 7.5 },
   });
 
   const safeName = title.replace(/[^a-zA-Z0-9]+/g, '_');

@@ -239,7 +239,7 @@ export const DashboardView: React.FC = () => {
         {[
           { id: 'sales', label: 'New Invoice', icon: Receipt },
           { id: 'scanner', label: 'Scan QR / Barcode', icon: QrCode },
-          { id: 'inventory', label: '22-Col Inventory', icon: Gem },
+          { id: 'inventory', label: 'Inventory', icon: Gem },
           { id: 'purchases', label: 'Record Purchase', icon: ShoppingBag },
           { id: 'payments', label: 'Payments & Dues', icon: Wallet },
           { id: 'reports', label: 'Excel / PDF Reports', icon: FileSpreadsheet },

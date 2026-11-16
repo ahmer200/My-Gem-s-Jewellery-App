@@ -86,7 +86,21 @@ function loadInitialState(): StoredBusinessState {
       const parsed = JSON.parse(raw) as Partial<StoredBusinessState>;
       return {
         profile: normalizeProfile(parsed.profile),
-        inventory: Array.isArray(parsed.inventory) ? parsed.inventory : INITIAL_INVENTORY,
+        inventory: Array.isArray(parsed.inventory)
+          ? parsed.inventory.map((i) => ({
+              ...i,
+              subCategory: i.subCategory ?? '',
+              stockPieces: i.stockPieces ?? i.stockQty ?? 0,
+              itemUnit: i.itemUnit ?? 'Carats',
+              oneTpWeight: i.oneTpWeight ?? i.weightCarats ?? 0,
+              batchNumber: i.batchNumber ?? '',
+              cent: i.cent ?? Math.round(((i.oneTpWeight ?? i.weightCarats) || 0) * 100),
+              fridge: i.fridge ?? '',
+              via: i.via ?? 'By Air',
+              purchaseDate: i.purchaseDate ?? '',
+              returnLossDamage: i.returnLossDamage ?? '0',
+            }))
+          : INITIAL_INVENTORY,
         purchases: Array.isArray(parsed.purchases) ? parsed.purchases : INITIAL_PURCHASES,
         sales: Array.isArray(parsed.sales)
           ? parsed.sales.map((s) => ({

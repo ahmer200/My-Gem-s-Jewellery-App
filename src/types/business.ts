@@ -34,30 +34,39 @@ export interface CompanyProfile {
 
 export interface InventoryItem {
   id: string;
-  sku: string; // 1. SKU / Barcode
-  name: string; // 2. Product Name
-  category: string; // 3. Category
-  gemstoneType: string; // 4. Gemstone Type
-  origin: string; // 5. Origin
-  shapeCut: string; // 6. Shape / Cut
-  colour: string; // 7. Colour
-  clarity: string; // 8. Clarity
-  weightCarats: number; // 9. Weight (ct)
-  sizeMm: string; // 10. Size (mm)
-  treatment: string; // 11. Treatment
-  certLab: string; // 12. Certificate Lab
-  certNumber: string; // 13. Certificate No.
-  stockQty: number; // 14. Stock Qty
-  minStockAlert: number; // 15. Min Alert
-  vaultLocation: string; // 16. Box / Vault
-  supplierName: string; // 17. Supplier
-  costCurrency: CurrencyCode; // 18. Cost Currency
-  costExchangeRate?: number; // Saved/custom rate -> PKR (0 = keep in costCurrency)
-  unitCost: number; // 19. Unit Cost (Orig.)
-  sellCurrency: CurrencyCode; // 20. Sell Currency
-  sellExchangeRate?: number; // Saved/custom rate -> PKR (0 = keep in sellCurrency)
-  baseSellPrice: number; // 21. Base Sell Price (Orig.)
-  // 22. Final Selling Price (w/ Markup, in PKR if rate > 0, or original currency if rate = 0)
+  sku: string; // 1. SKU (Auto-generated from Size, Sub-Category, Pcs & Batch #)
+  name: string; // Product title / display label
+  sizeMm: string; // 2. Size (mm)
+  colour: string; // 3. Colour
+  shapeCut: string; // 4. Shape
+  subCategory: string; // 5. Sub-Category
+  category: string; // 6. Category
+  stockPieces: number; // 7. Stock Pieces
+  itemUnit: string; // 8. Item Unit (Carat, Piece, Gram, Lot, Parcel)
+  oneTpWeight: number; // 9. 1TP Weight
+  batchNumber: string; // 10. Batch #
+  stockQty: number; // 11. Stock Quantity
+  cent: number; // 12. Cent
+  fridge: string; // 13. Fridge
+  costCurrency: CurrencyCode; // 14. Cost Currency
+  costExchangeRate?: number; // Cost rate -> PKR (0 = keep in costCurrency)
+  unitCost: number; // 14. Cost
+  sellCurrency: CurrencyCode; // 15. Price Currency
+  sellExchangeRate?: number; // Sell rate -> PKR (0 = keep in sellCurrency)
+  baseSellPrice: number; // 15. Price
+  via: string; // 16. Via (By Sea / By Air)
+  purchaseDate: string; // 17. Purchase Date
+  returnLossDamage: string; // 18. Return/Loss/Damage
+  gemstoneType: string; // 19. Gemstone
+  origin: string; // 20. Origin
+  clarity: string; // 21. Clarity
+  treatment: string; // 22. Treatment
+  certLab: string; // 23. Cert Lab
+  certNumber: string; // 24. Cert No.
+  minStockAlert: number; // 25. Min Alert
+  vaultLocation: string; // 26. Vault / Box
+  supplierName: string; // 27. Supplier/ Carrier
+  weightCarats: number; // Synced carat weight for QR labels & gem logs
   imageUrl?: string;
   notes?: string;
   createdAt: string;
