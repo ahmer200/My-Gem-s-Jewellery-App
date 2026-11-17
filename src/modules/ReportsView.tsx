@@ -3,7 +3,6 @@ import { Edit3, FileDown, FileSpreadsheet, Lock, Printer, Truck } from 'lucide-r
 import { useBusiness } from '../context/BusinessContext';
 import { SalesOrder } from '../types/business';
 import {
-  computeItemFinalPkr,
   convertToPkr,
   formatMoney,
   getRateForCurrency,
@@ -11,6 +10,7 @@ import {
 import {
   exportGenericReportExcel,
   exportGenericReportPdf,
+  GenericReportExportOptions,
 } from '../utils/exporters';
 import { computeItemVelocity } from '../utils/velocity';
 import { ItemVelocityChart } from '../components/ItemVelocityChart';
@@ -32,6 +32,8 @@ export const ReportsView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ReportTab>('stock');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [stockPageSize, setStockPageSize] = useState<'15' | '25' | '50' | 'all'>('15');
+  const [stockPage, setStockPage] = useState(1);
   const [dispatchTarget, setDispatchTarget] = useState<SalesOrder | null>(null);
   const [previewOrder, setPreviewOrder] = useState<SalesOrder | null>(null);
 
@@ -55,42 +57,89 @@ export const ReportsView: React.FC = () => {
     });
   }, [purchases, dateFrom, dateTo]);
 
-  // Report datasets (All include Currency Type, Exchange Rate, and Percentage Used)
-  const reportConfig = useMemo(() => {
+  const stockCostTotalPkr = useMemo(
+    () =>
+      inventory.reduce((s, i) => {
+        const costRate =
+          i.costCurrency === 'PKR'
+            ? 1
+            : typeof i.costExchangeRate === 'number'
+              ? i.costExchangeRate
+              : getRateForCurrency(i.costCurrency, profile);
+        return s + convertToPkr(i.unitCost, i.costCurrency, costRate) * i.stockQty;
+      }, 0),
+    [inventory, profile]
+  );
+
+  // Map every inventory item (by ID or SKU) to all Sold Invoice Numbers
+  const soldInvoicesByItem = useMemo(() => {
+    const byId = new Map<string, string[]>();
+    const bySku = new Map<string, string[]>();
+
+    for (const sale of sales) {
+      for (const li of sale.items) {
+        if (li.inventoryId) {
+          const arr = byId.get(li.inventoryId) || [];
+          if (!arr.includes(sale.invoiceNo)) arr.push(sale.invoiceNo);
+          byId.set(li.inventoryId, arr);
+        }
+        const skuKey = (li.sku || '').trim().toUpperCase();
+        if (skuKey) {
+          const arr = bySku.get(skuKey) || [];
+          if (!arr.includes(sale.invoiceNo)) arr.push(sale.invoiceNo);
+          bySku.set(skuKey, arr);
+        }
+      }
+    }
+
+    return { byId, bySku };
+  }, [sales]);
+
+  // Report datasets
+  const reportConfig = useMemo<{
+    title: string;
+    subtitle: string;
+    headers: string[];
+    rows: (string | number)[][];
+    exportOptions?: GenericReportExportOptions;
+  }>(() => {
     const defCur = profile.defaultCurrency || 'CNY';
     const defRate = getRateForCurrency(defCur, profile);
 
     if (activeTab === 'stock') {
       const headers = [
-        '1. SKU',
-        '2. Size (mm)',
-        '3. Colour',
-        '4. Shape',
-        '5. Sub-Category',
-        '6. Category',
-        '7. Stock Pieces',
-        '8. Item Unit',
-        '9. 1TP Weight',
-        '10. Batch #',
-        '11. Stock Quantity',
-        '12. Cent',
-        '13. Fridge',
-        '14. Cost',
-        '15. Price',
-        '16. Via (By Sea/ By Air)',
-        '17. Purchase Date',
-        '18. Return/Loss/Damage',
-        '19. Gemstone',
-        '20. Origin',
-        '21. Clarity',
-        '22. Treatment',
-        '23. Cert Lab',
-        '24. Cert No.',
-        '25. Min Alert',
-        '26. Vault / Box',
-        '27. Supplier/ Carrier',
-        '28. Remarks',
+        'SKU',
+        'Sold Invoice #',
+        'Size (mm)',
+        'Colour',
+        'Shape',
+        'Sub-Category',
+        'Category',
+        'Stock Pieces',
+        'Item Unit',
+        '1TP Weight',
+        'Batch #',
+        'Stock Quantity',
+        'Cent',
+        'Fridge',
+        'Cost Price',
+        'Via (By Sea/ By Air)',
+        'Purchase Date',
+        'Return/Loss/Damage',
+        'Gemstone',
+        'Origin',
+        'Clarity',
+        'Treatment',
+        'Cert Lab',
+        'Cert No.',
+        'Min Alert',
+        'Vault / Box',
+        'Supplier/ Carrier',
+        'Remarks',
       ];
+      let grandTotalQty = 0;
+      let grandTotalPieces = 0;
+
       const rows = inventory.map((item) => {
         const costRate =
           item.costCurrency === 'PKR'
@@ -98,38 +147,40 @@ export const ReportsView: React.FC = () => {
             : typeof item.costExchangeRate === 'number'
               ? item.costExchangeRate
               : getRateForCurrency(item.costCurrency, profile);
-        const costConverted =
-          item.costCurrency !== 'PKR' && costRate === 0
-            ? `${formatMoney(item.unitCost, item.costCurrency)} (Rate 0)`
-            : `${formatMoney(item.unitCost, item.costCurrency)} (${formatMoney(
+        const costOnlyLabel =
+          item.costCurrency !== 'PKR' && costRate > 0
+            ? `${formatMoney(item.unitCost, item.costCurrency)} (${formatMoney(
                 convertToPkr(item.unitCost, item.costCurrency, costRate),
                 'PKR'
-              )})`;
-        const sellCalc = computeItemFinalPkr(
-          item.baseSellPrice,
-          item.sellCurrency,
-          profile,
-          item.sellExchangeRate
-        );
+              )})`
+            : formatMoney(item.unitCost, item.costCurrency);
+
+        const invById = soldInvoicesByItem.byId.get(item.id) || [];
+        const invBySku = soldInvoicesByItem.bySku.get((item.sku || '').trim().toUpperCase()) || [];
+        const mergedInvoices = Array.from(new Set([...invById, ...invBySku]));
+        const soldInvoicesText = mergedInvoices.length > 0 ? mergedInvoices.join(', ') : '—';
+
+        const pcs = item.stockPieces ?? 0;
+        const qty = item.stockQty ?? 0;
+        grandTotalPieces += pcs;
+        grandTotalQty += qty;
+
         return [
           item.sku,
+          soldInvoicesText,
           item.sizeMm || '—',
           item.colour || '—',
           item.shapeCut || '—',
           item.subCategory || '—',
           item.category || '—',
-          item.stockPieces ?? 0,
+          pcs,
           item.itemUnit || 'Carats',
           item.oneTpWeight ?? item.weightCarats ?? 0,
           item.batchNumber || '—',
-          item.stockQty,
+          qty,
           item.cent ?? 0,
           item.fridge || '—',
-          costConverted,
-          `${formatMoney(sellCalc.finalDisplayAmount, sellCalc.finalCurrency)} (Base: ${formatMoney(
-            item.baseSellPrice,
-            item.sellCurrency
-          )})`,
+          costOnlyLabel,
           item.via || '—',
           item.purchaseDate || '—',
           item.returnLossDamage || '0',
@@ -145,11 +196,32 @@ export const ReportsView: React.FC = () => {
           item.notes || '—',
         ];
       });
+
+      const grandTotalRow: (string | number)[] = new Array(headers.length).fill('');
+      grandTotalRow[0] = 'GRAND TOTAL';
+      grandTotalRow[7] = grandTotalPieces;
+      grandTotalRow[11] = Number(grandTotalQty.toFixed(2));
+      grandTotalRow[14] = formatMoney(stockCostTotalPkr, 'PKR');
+
       return {
         title: 'Stock Report',
-        subtitle: `Total SKUs: ${inventory.length} | Default Currency: ${defCur}=${defRate} PKR, Markup=${profile.defaultMarkupPercent}%`,
+        subtitle: `Total SKUs: ${inventory.length} | Cost Price Only | Grand Total Qty: ${Number(
+          grandTotalQty.toFixed(2)
+        )} | Total Cost: ${formatMoney(stockCostTotalPkr, 'PKR')}`,
         headers,
         rows,
+        exportOptions: {
+          quantityColumnIndex: 11,
+          piecesColumnIndex: 7,
+          hideMarkupInHeader: true,
+          grandTotalRow,
+          grandTotalText: `GRAND TOTAL (All Pages) — Total Stock Quantity: ${Number(
+            grandTotalQty.toFixed(2)
+          )}  |  Total Pieces: ${grandTotalPieces}  |  Total Stock Cost: ${formatMoney(
+            stockCostTotalPkr,
+            'PKR'
+          )}`,
+        },
       };
     }
 
@@ -394,17 +466,69 @@ export const ReportsView: React.FC = () => {
       headers,
       rows,
     };
-  }, [activeTab, inventory, filteredSales, filteredPurchases, profile]);
+  }, [
+    activeTab,
+    inventory,
+    filteredSales,
+    filteredPurchases,
+    profile,
+    soldInvoicesByItem,
+    stockCostTotalPkr,
+  ]);
+
+  const stockNumericSize =
+    stockPageSize === 'all' ? Math.max(1, reportConfig.rows.length) : Number(stockPageSize);
+  const stockTotalPages =
+    activeTab === 'stock'
+      ? Math.max(1, Math.ceil(reportConfig.rows.length / stockNumericSize))
+      : 1;
+  const safeStockPage = Math.min(stockPage, stockTotalPages);
+
+  const displayedRows = useMemo(() => {
+    if (activeTab !== 'stock' || stockPageSize === 'all') {
+      return reportConfig.rows;
+    }
+    const start = (safeStockPage - 1) * stockNumericSize;
+    return reportConfig.rows.slice(start, start + stockNumericSize);
+  }, [activeTab, stockPageSize, safeStockPage, stockNumericSize, reportConfig.rows]);
+
+  const pageTotalQty = useMemo(() => {
+    if (activeTab !== 'stock') return 0;
+    return displayedRows.reduce((sum, r) => sum + (Number(r[11]) || 0), 0);
+  }, [activeTab, displayedRows]);
+
+  const pageTotalPieces = useMemo(() => {
+    if (activeTab !== 'stock') return 0;
+    return displayedRows.reduce((sum, r) => sum + (Number(r[7]) || 0), 0);
+  }, [activeTab, displayedRows]);
+
+  const grandTotalQty = useMemo(() => {
+    if (activeTab !== 'stock') return 0;
+    return reportConfig.rows.reduce((sum, r) => sum + (Number(r[11]) || 0), 0);
+  }, [activeTab, reportConfig.rows]);
+
+  const grandTotalPieces = useMemo(() => {
+    if (activeTab !== 'stock') return 0;
+    return reportConfig.rows.reduce((sum, r) => sum + (Number(r[7]) || 0), 0);
+  }, [activeTab, reportConfig.rows]);
 
   const handleExportExcel = () => {
     const defCur = profile.defaultCurrency || 'CNY';
-    exportGenericReportExcel(reportConfig.title, reportConfig.headers, reportConfig.rows, [
-      ['Merchant', profile.companyName],
-      ['Default World Currency', defCur],
-      ['Default Rate -> PKR', String(getRateForCurrency(defCur, profile))],
-      ['Default Markup %', `${profile.defaultMarkupPercent}%`],
-      ['Generated', new Date().toLocaleString()],
-    ]);
+    exportGenericReportExcel(
+      reportConfig.title,
+      reportConfig.headers,
+      reportConfig.rows,
+      [
+        ['Merchant', profile.companyName],
+        ['Default World Currency', defCur],
+        ['Default Rate -> PKR', String(getRateForCurrency(defCur, profile))],
+        ...(activeTab !== 'stock'
+          ? ([['Default Markup %', `${profile.defaultMarkupPercent}%`]] as [string, string][])
+          : []),
+        ['Generated', new Date().toLocaleString()],
+      ],
+      reportConfig.exportOptions
+    );
   };
 
   const handleExportPdf = () => {
@@ -413,19 +537,10 @@ export const ReportsView: React.FC = () => {
       reportConfig.subtitle,
       reportConfig.headers,
       reportConfig.rows,
-      profile
+      profile,
+      reportConfig.exportOptions
     );
   };
-
-  const stockCostTotalPkr = inventory.reduce((s, i) => {
-    const costRate =
-      i.costCurrency === 'PKR'
-        ? 1
-        : typeof i.costExchangeRate === 'number'
-          ? i.costExchangeRate
-          : getRateForCurrency(i.costCurrency, profile);
-    return s + convertToPkr(i.unitCost, i.costCurrency, costRate) * i.stockQty;
-  }, 0);
 
   return (
     <div className="space-y-6">
@@ -522,9 +637,50 @@ export const ReportsView: React.FC = () => {
             <p className="text-xs text-slate-500">{reportConfig.subtitle}</p>
           </div>
           {activeTab === 'stock' && (
-            <span className="font-mono text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Total Stock Cost: {formatMoney(stockCostTotalPkr, 'PKR')}
-            </span>
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                Total Stock Cost: {formatMoney(stockCostTotalPkr, 'PKR')}
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500">Rows/Page:</span>
+                <select
+                  value={stockPageSize}
+                  onChange={(e) => {
+                    setStockPageSize(e.target.value as '15' | '25' | '50' | 'all');
+                    setStockPage(1);
+                  }}
+                  className="rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 py-1 text-xs"
+                >
+                  <option value="15">15</option>
+                  <option value="25">25</option>
+                  <option value="50">50</option>
+                  <option value="all">All</option>
+                </select>
+                {stockTotalPages > 1 && (
+                  <div className="flex items-center gap-1 ml-1">
+                    <button
+                      type="button"
+                      disabled={safeStockPage <= 1}
+                      onClick={() => setStockPage((p) => Math.max(1, p - 1))}
+                      className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <span className="font-mono px-1">
+                      {safeStockPage}/{stockTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={safeStockPage >= stockTotalPages}
+                      onClick={() => setStockPage((p) => Math.min(stockTotalPages, p + 1))}
+                      className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
@@ -540,19 +696,23 @@ export const ReportsView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-              {reportConfig.rows.length === 0 ? (
+              {displayedRows.length === 0 ? (
                 <tr>
                   <td colSpan={reportConfig.headers.length} className="py-10 text-center text-slate-500">
                     No records found for this date range.
                   </td>
                 </tr>
               ) : (
-                reportConfig.rows.map((row, idx) => (
+                displayedRows.map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
                     {row.map((cell, cIdx) => (
                       <td
                         key={cIdx}
-                        className="py-3 px-4 whitespace-nowrap font-mono text-slate-800 dark:text-slate-200"
+                        className={`py-3 px-4 whitespace-nowrap font-mono ${
+                          activeTab === 'stock' && cIdx === 1 && cell !== '—'
+                            ? 'font-bold text-emerald-700 dark:text-emerald-400'
+                            : 'text-slate-800 dark:text-slate-200'
+                        }`}
                       >
                         {cell}
                       </td>
@@ -561,6 +721,42 @@ export const ReportsView: React.FC = () => {
                 ))
               )}
             </tbody>
+            {activeTab === 'stock' && displayedRows.length > 0 && (
+              <tfoot className="border-t-2 border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 font-mono text-xs">
+                <tr>
+                  <td colSpan={7} className="py-2.5 px-4 font-bold text-slate-800 dark:text-slate-200 whitespace-nowrap">
+                    Page {safeStockPage} of {stockTotalPages} Total ({displayedRows.length} items)
+                  </td>
+                  <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                    {pageTotalPieces}
+                  </td>
+                  <td colSpan={3} />
+                  <td className="py-2.5 px-4 font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                    {Number(pageTotalQty.toFixed(2))}
+                  </td>
+                  <td colSpan={16} />
+                </tr>
+                {safeStockPage === stockTotalPages && (
+                  <tr className="border-t border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/30">
+                    <td colSpan={7} className="py-3 px-4 font-extrabold text-emerald-900 dark:text-emerald-300 whitespace-nowrap">
+                      GRAND TOTAL (All {reportConfig.rows.length} Items)
+                    </td>
+                    <td className="py-3 px-4 font-extrabold text-emerald-900 dark:text-emerald-300 whitespace-nowrap">
+                      {grandTotalPieces}
+                    </td>
+                    <td colSpan={3} />
+                    <td className="py-3 px-4 font-extrabold text-emerald-900 dark:text-emerald-300 whitespace-nowrap">
+                      {Number(grandTotalQty.toFixed(2))}
+                    </td>
+                    <td colSpan={2} />
+                    <td className="py-3 px-4 font-extrabold text-emerald-900 dark:text-emerald-300 whitespace-nowrap">
+                      {formatMoney(stockCostTotalPkr, 'PKR')}
+                    </td>
+                    <td colSpan={13} />
+                  </tr>
+                )}
+              </tfoot>
+            )}
           </table>
         </div>
       </div>

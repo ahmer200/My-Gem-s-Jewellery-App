@@ -305,11 +305,20 @@ export function getInvoicePdfPreviewUrl(
   return URL.createObjectURL(blob);
 }
 
+export interface GenericReportExportOptions {
+  quantityColumnIndex?: number;
+  piecesColumnIndex?: number;
+  grandTotalRow?: (string | number)[];
+  grandTotalText?: string;
+  hideMarkupInHeader?: boolean;
+}
+
 export function exportGenericReportExcel(
   title: string,
   headers: string[],
   rows: (string | number)[][],
-  metaRows: [string, string][]
+  metaRows: [string, string][],
+  options?: GenericReportExportOptions
 ) {
   const wb = XLSX.utils.book_new();
   const sheetData: (string | number)[][] = [
@@ -318,6 +327,7 @@ export function exportGenericReportExcel(
     [],
     headers,
     ...rows,
+    ...(options?.grandTotalRow ? [options.grandTotalRow] : []),
   ];
   const ws = XLSX.utils.aoa_to_sheet(sheetData);
   XLSX.utils.book_append_sheet(wb, ws, 'Report');
@@ -330,36 +340,135 @@ export function exportGenericReportPdf(
   subtitle: string,
   headers: string[],
   rows: (string | number)[][],
-  profile: CompanyProfile
+  profile: CompanyProfile,
+  options?: GenericReportExportOptions
 ) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const isWide = headers.length > 18;
+  const sideMargin = isWide ? 8 : 14;
+
   doc.setFontSize(14);
   doc.setTextColor(6, 78, 59);
-  doc.text(`${profile.companyName} — ${title}`, 14, 14);
+  doc.text(`${profile.companyName} — ${title}`, sideMargin, 14);
   doc.setFontSize(9);
   doc.setTextColor(71, 85, 105);
-  doc.text(subtitle, 14, 20);
+  doc.text(subtitle, sideMargin, 20);
   const defaultCur = profile.defaultCurrency || 'CNY';
   const defaultRate = getRateForCurrency(defaultCur, profile);
-  doc.text(
-    `Active FX: ${defaultCur}→PKR ${defaultRate} | Default Markup: ${profile.defaultMarkupPercent}% | Aqsa Business Management System`,
-    14,
-    25
-  );
+  const headerInfo = options?.hideMarkupInHeader
+    ? `Active FX: ${defaultCur}→PKR ${defaultRate} | Generated: ${new Date().toLocaleDateString()} | Aqsa Business Management System`
+    : `Active FX: ${defaultCur}→PKR ${defaultRate} | Default Markup: ${profile.defaultMarkupPercent}% | Aqsa Business Management System`;
+  doc.text(headerInfo, sideMargin, 25);
 
-  const isWide = headers.length > 18;
+  const qtyIdx = options?.quantityColumnIndex;
+  const pcsIdx = options?.piecesColumnIndex;
+  const pageQtyMap = new Map<number, number>();
+  const pagePiecesMap = new Map<number, number>();
+  const pageCountMap = new Map<number, number>();
+
+  let grandTotalQty = 0;
+  let grandTotalPieces = 0;
+  if (typeof qtyIdx === 'number') {
+    for (const r of rows) {
+      const val = Number(String(r[qtyIdx] ?? 0).replace(/,/g, ''));
+      if (Number.isFinite(val)) grandTotalQty += val;
+    }
+  }
+  if (typeof pcsIdx === 'number') {
+    for (const r of rows) {
+      const val = Number(String(r[pcsIdx] ?? 0).replace(/,/g, ''));
+      if (Number.isFinite(val)) grandTotalPieces += val;
+    }
+  }
+
   autoTable(doc, {
     startY: 30,
     head: [headers],
     body: rows.map((r) => r.map((c) => String(c))),
-    margin: isWide ? { left: 8, right: 8 } : undefined,
+    margin: { left: sideMargin, right: sideMargin, bottom: 20 },
     styles: {
-      fontSize: isWide ? 4.8 : 7.5,
-      cellPadding: isWide ? 0.9 : 2,
+      fontSize: isWide ? 4.7 : 7.5,
+      cellPadding: isWide ? 0.85 : 2,
       overflow: 'linebreak',
     },
-    headStyles: { fillColor: [6, 78, 59], textColor: 255, fontSize: isWide ? 4.8 : 7.5 },
+    headStyles: { fillColor: [6, 78, 59], textColor: 255, fontSize: isWide ? 4.7 : 7.5 },
+    didDrawCell: (data) => {
+      if (data.section !== 'body') return;
+      if (data.column.index === 0) {
+        pageCountMap.set(data.pageNumber, (pageCountMap.get(data.pageNumber) || 0) + 1);
+      }
+      if (typeof qtyIdx === 'number' && data.column.index === qtyIdx) {
+        const val = Number(String(rows[data.row.index]?.[qtyIdx] ?? 0).replace(/,/g, ''));
+        if (Number.isFinite(val)) {
+          pageQtyMap.set(data.pageNumber, (pageQtyMap.get(data.pageNumber) || 0) + val);
+        }
+      }
+      if (typeof pcsIdx === 'number' && data.column.index === pcsIdx) {
+        const val = Number(String(rows[data.row.index]?.[pcsIdx] ?? 0).replace(/,/g, ''));
+        if (Number.isFinite(val)) {
+          pagePiecesMap.set(data.pageNumber, (pagePiecesMap.get(data.pageNumber) || 0) + val);
+        }
+      }
+    },
   });
+
+  // Grand Total block on the very last page
+  if (options?.grandTotalText || typeof qtyIdx === 'number') {
+    const lastY =
+      (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40;
+    let targetY = lastY + 4;
+    if (targetY > pageHeight - 32) {
+      doc.addPage();
+      targetY = 18;
+    }
+
+    const boxWidth = pageWidth - sideMargin * 2;
+    doc.setDrawColor(6, 78, 59);
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(sideMargin, targetY, boxWidth, 10, 1.5, 1.5, 'FD');
+    doc.setFontSize(8.5);
+    doc.setTextColor(6, 78, 59);
+    const summaryText =
+      options?.grandTotalText ||
+      `GRAND TOTAL (All Pages) — Total Stock Quantity: ${Number(grandTotalQty.toFixed(2))}${
+        typeof pcsIdx === 'number' ? `  |  Total Stock Pieces: ${Number(grandTotalPieces.toFixed(0))}` : ''
+      }`;
+    doc.text(summaryText, sideMargin + 3, targetY + 6.5);
+  }
+
+  // Draw Per-Page Quantity Total at bottom of EVERY page + Grand Total summary on last page
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    const footerY = pageHeight - 10;
+    doc.setDrawColor(203, 213, 225);
+    doc.line(sideMargin, footerY - 4, pageWidth - sideMargin, footerY - 4);
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+
+    const pQty = Number((pageQtyMap.get(p) || 0).toFixed(2));
+    const pPcs = Number((pagePiecesMap.get(p) || 0).toFixed(0));
+    const pCount = pageCountMap.get(p) || 0;
+
+    const leftFooter =
+      typeof qtyIdx === 'number'
+        ? `Page ${p} of ${totalPages}  |  Items: ${pCount}${
+            typeof pcsIdx === 'number' ? `  |  Page Pieces Total: ${pPcs}` : ''
+          }  |  Page Stock Quantity Total: ${pQty}`
+        : `Page ${p} of ${totalPages}  |  Rows on Page: ${pCount}`;
+
+    doc.text(leftFooter, sideMargin, footerY);
+
+    if (typeof qtyIdx === 'number') {
+      const rightFooter =
+        p === totalPages
+          ? `Grand Total Qty (Final): ${Number(grandTotalQty.toFixed(2))}`
+          : `Running Grand Total Qty: ${Number(grandTotalQty.toFixed(2))}`;
+      doc.text(rightFooter, pageWidth - sideMargin, footerY, { align: 'right' });
+    }
+  }
 
   const safeName = title.replace(/[^a-zA-Z0-9]+/g, '_');
   doc.save(`${safeName}_${new Date().toISOString().slice(0, 10)}.pdf`);
