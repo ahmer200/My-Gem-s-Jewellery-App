@@ -96500,7 +96500,7 @@ function le() {
 	}, t.allowFsRead = void 0, t.loadImageFile = t.loadFile;
 }(E.API), function(e) {
 	function r() {
-		return (i.html2canvas ? Promise.resolve(i.html2canvas) : __vitePreload(() => import("./html2canvas-D6pad-az.js").then((m) => /* @__PURE__ */ __toESM(m.default)), [], import.meta.url)).catch(function(t) {
+		return (i.html2canvas ? Promise.resolve(i.html2canvas) : __vitePreload(() => import("./html2canvas-BqINXu5i.js").then((m) => /* @__PURE__ */ __toESM(m.default)), [], import.meta.url)).catch(function(t) {
 			return Promise.reject(/* @__PURE__ */ new Error("Could not load html2canvas: " + t));
 		}).then(function(t) {
 			return t.default ? t.default : t;
@@ -97667,7 +97667,7 @@ function le() {
 		ignoreAnimation: !0,
 		ignoreDimensions: !0
 	}, d = this;
-	return (i.canvg ? Promise.resolve(i.canvg) : __vitePreload(() => import("./index.es-C30cXNpv.js"), [], import.meta.url)).catch(function(t) {
+	return (i.canvg ? Promise.resolve(i.canvg) : __vitePreload(() => import("./index.es-CK0BIPLK.js"), [], import.meta.url)).catch(function(t) {
 		return Promise.reject(/* @__PURE__ */ new Error("Could not load canvg: " + t));
 	}).then(function(t) {
 		return t.default ? t.default : t;
@@ -102730,8 +102730,9 @@ function buildInvoicePdfDoc(order, profile, withAutoPrint = false) {
 	doc.text(`Contact: ${order.customerPhone || "N/A"}`, 14, 56);
 	doc.text(`Address: ${order.customerAddress || "N/A"}`, 14, 61);
 	doc.text(`Payment Status: ${order.paymentStatus}`, 150, 51);
-	doc.text(`Prepared By: ${order.createdBy}`, 150, 56);
+	doc.text("Ahmer Iqbal", 150, 56);
 	doc.text(order.dispatchStatus === "Dispatched" ? `Dispatch: Dispatched (Arrives: ${order.expectedArrivalDate || "N/A"})` : "Dispatch: Pending Dispatch", 14, 66);
+	const rateFactor = order.sourceCurrency !== order.finalCurrency && order.exchangeRateApplied > 0 ? order.exchangeRateApplied : 1;
 	autoTable(doc, {
 		startY: 72,
 		head: [[
@@ -102739,20 +102740,20 @@ function buildInvoicePdfDoc(order, profile, withAutoPrint = false) {
 			"Product & Gemstone Details",
 			"Cert #",
 			"Qty",
-			`Unit (${order.sourceCurrency})`,
-			"Item %",
-			`Total w/ % (${order.sourceCurrency})`
+			`Unit (${order.finalCurrency})`,
+			`Total (${order.finalCurrency})`
 		]],
 		body: order.items.map((item) => {
 			const { percentUsed, lineTotalOrig } = getLineItemAmounts(item, order.markupPercentUsed);
+			const finalUnitPrice = item.unitPriceOrig * (1 + percentUsed / 100) * rateFactor;
+			const finalLineTotal = lineTotalOrig * rateFactor;
 			return [
 				item.sku,
 				`${item.productName}\n${item.gemstoneDetails}`,
 				item.certNumber || "—",
 				String(item.quantity),
-				formatMoney(item.unitPriceOrig, order.sourceCurrency),
-				`+${percentUsed}%`,
-				formatMoney(lineTotalOrig, order.sourceCurrency)
+				formatMoney(finalUnitPrice, order.finalCurrency),
+				formatMoney(finalLineTotal, order.finalCurrency)
 			];
 		}),
 		styles: {
@@ -102768,35 +102769,29 @@ function buildInvoicePdfDoc(order, profile, withAutoPrint = false) {
 			textColor: 255
 		}
 	});
-	const boxY = (doc.lastAutoTable?.finalY || 125) + 8;
-	doc.setDrawColor(203, 213, 225);
-	doc.setFillColor(248, 250, 252);
-	doc.roundedRect(14, boxY, 182, 52, 2, 2, "FD");
-	doc.setFontSize(9.5);
-	doc.setTextColor(15, 23, 42);
-	doc.text("Currency & Percentage Calculation Breakdown", 18, boxY + 7);
-	doc.setFontSize(8.5);
-	const isOrigMode = order.sourceCurrency !== "PKR" && order.exchangeRateApplied === 0;
-	doc.text(`Currency Used: ${order.sourceCurrency}`, 18, boxY + 14);
-	doc.text(isOrigMode ? `Exchange Rate Applied: Rate = 0 (Original Currency Mode — ${order.finalCurrency})` : `Exchange Rate Applied: 1 ${order.sourceCurrency} = ${order.exchangeRateApplied.toFixed(2)} PKR`, 18, boxY + 20);
-	doc.text(`Percentage Markup Applied: ${order.markupPercentUsed}%`, 18, boxY + 26);
-	doc.text(`Base Amount: ${formatMoney(order.baseSubtotal, order.sourceCurrency)}`, 18, boxY + 32);
-	doc.text(`Converted Amount: ${isOrigMode ? `Original Currency (${order.finalCurrency})` : formatMoney(order.convertedAmountPkr, "PKR")}`, 18, boxY + 38);
+	const finalY = doc.lastAutoTable?.finalY || 125;
+	const boxY = Math.min(finalY + 8, 232);
+	doc.setDrawColor(167, 243, 208);
+	doc.setFillColor(236, 253, 245);
+	doc.roundedRect(112, boxY, 84, 38, 2, 2, "FD");
 	doc.setFontSize(8.5);
 	doc.setTextColor(71, 85, 105);
-	doc.text(`Markup (${order.markupPercentUsed}%): + ${formatMoney(order.markupAmount, order.finalCurrency)}`, 120, boxY + 14);
-	doc.text(`Courier Charges: + ${formatMoney(order.courierCharges || 0, order.finalCurrency)}`, 120, boxY + 20);
-	doc.setFontSize(12);
-	doc.setTextColor(6, 78, 59);
-	doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 120, boxY + 30);
-	doc.setFontSize(9);
-	doc.setTextColor(71, 85, 105);
-	doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, "PKR")}`, 120, boxY + 38);
+	doc.text(`Courier Charges: + ${formatMoney(order.courierCharges || 0, order.finalCurrency)}`, 116, boxY + 8);
+	doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, "PKR")}`, 116, boxY + 15);
 	const duePkr = Math.max(0, order.finalTotalPkrEquivalent - order.paidAmountPkr);
-	doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, "PKR")}`, 120, boxY + 45);
+	doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, "PKR")}`, 116, boxY + 22);
+	doc.setFontSize(11.5);
+	doc.setTextColor(6, 78, 59);
+	doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 116, boxY + 32);
+	if (order.notes) {
+		doc.setFontSize(8);
+		doc.setTextColor(71, 85, 105);
+		doc.text(`Note: ${order.notes}`, 14, Math.min(boxY + 46, 272));
+	}
 	doc.setFontSize(8);
 	doc.setTextColor(100, 116, 139);
-	doc.text(profile.invoiceFooter, 14, 282);
+	doc.text(profile.invoiceFooter, 14, 280);
+	doc.text("Computer generated invoice — no signature required.", 14, 285);
 	if (withAutoPrint) doc.autoPrint();
 	return doc;
 }
@@ -103021,8 +103016,7 @@ var InvoiceModal = ({ order, onClose }) => {
 	const shareWhatsApp = () => {
 		const cleanPhone = (currentOrder.customerPhone || "").replace(/[^\d]/g, "");
 		const dispatchLine = isDispatched ? `\nDispatch: Dispatched (Expected Arrival: ${currentOrder.expectedArrivalDate || "N/A"})` : "\nDispatch: Pending Dispatch";
-		const isOrigMode = currentOrder.sourceCurrency !== "PKR" && currentOrder.exchangeRateApplied === 0;
-		const msg = encodeURIComponent(`Assalam-o-Alaikum ${currentOrder.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${currentOrder.invoiceNo}\nDate: ${currentOrder.orderDate}\nCurrency Used: ${currentOrder.sourceCurrency}\nExchange Rate Applied: ${isOrigMode ? `Rate = 0 (Original ${currentOrder.finalCurrency} Mode)` : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied} PKR`}\nMarkup Applied: ${currentOrder.markupPercentUsed}%\nCourier Charges: ${formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}\n*Final Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}*\nStatus: ${currentOrder.paymentStatus}${dispatchLine}\n\nThank you for your business!`);
+		const msg = encodeURIComponent(`Assalam-o-Alaikum ${currentOrder.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${currentOrder.invoiceNo}\nDate: ${currentOrder.orderDate}\nCourier Charges: ${formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}\n*Final Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}*\nStatus: ${currentOrder.paymentStatus}${dispatchLine}\n\nThank you for your business!`);
 		window.open(cleanPhone ? `https://wa.me/${cleanPhone}?text=${msg}` : `https://wa.me/?text=${msg}`, "_blank");
 	};
 	const openPdfPrintPreview = (autoPrintFlag = false) => {
@@ -103277,9 +103271,9 @@ var InvoiceModal = ({ order, onClose }) => {
 										className: "text-slate-800 font-medium mt-1",
 										children: "Aqsa Business Management System"
 									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-										className: "text-slate-600",
-										children: ["Prepared by: ", currentOrder.createdBy]
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
+										className: "text-slate-700 font-medium",
+										children: "Ahmer Iqbal"
 									}),
 									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 										className: "text-slate-600",
@@ -103325,19 +103319,15 @@ var InvoiceModal = ({ order, onClose }) => {
 											className: "py-2.5 pr-3 font-semibold text-right",
 											children: [
 												"Unit (",
-												currentOrder.sourceCurrency,
+												currentOrder.finalCurrency,
 												")"
 											]
-										}),
-										/* @__PURE__ */ (0, import_jsx_runtime.jsx)("th", {
-											className: "py-2.5 pr-3 font-semibold text-right",
-											children: "Item %"
 										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("th", {
 											className: "py-2.5 font-semibold text-right",
 											children: [
-												"Total w/ % (",
-												currentOrder.sourceCurrency,
+												"Total (",
+												currentOrder.finalCurrency,
 												")"
 											]
 										})
@@ -103345,7 +103335,10 @@ var InvoiceModal = ({ order, onClose }) => {
 								}) }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("tbody", {
 									className: "divide-y divide-slate-200",
 									children: currentOrder.items.map((item, idx) => {
-										const { percentUsed, lineBaseOrig, lineTotalOrig } = getLineItemAmounts(item, currentOrder.markupPercentUsed);
+										const { percentUsed, lineTotalOrig } = getLineItemAmounts(item, currentOrder.markupPercentUsed);
+										const rateFactor = currentOrder.sourceCurrency !== currentOrder.finalCurrency && currentOrder.exchangeRateApplied > 0 ? currentOrder.exchangeRateApplied : 1;
+										const finalUnitPrice = item.unitPriceOrig * (1 + percentUsed / 100) * rateFactor;
+										const finalLineTotal = lineTotalOrig * rateFactor;
 										return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("tr", { children: [
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "py-2.5 pr-3 font-mono text-slate-700 whitespace-nowrap",
@@ -103371,110 +103364,24 @@ var InvoiceModal = ({ order, onClose }) => {
 											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
 												className: "py-2.5 pr-3 text-right font-mono whitespace-nowrap",
-												children: formatMoney(item.unitPriceOrig, currentOrder.sourceCurrency)
+												children: formatMoney(finalUnitPrice, currentOrder.finalCurrency)
 											}),
-											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
-												className: "py-2.5 pr-3 text-right font-mono whitespace-nowrap text-emerald-800 font-semibold",
-												children: [
-													"+",
-													percentUsed,
-													"%"
-												]
-											}),
-											/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("td", {
-												className: "py-2.5 text-right font-mono whitespace-nowrap",
-												children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-													className: "font-semibold text-slate-900",
-													children: formatMoney(lineTotalOrig, currentOrder.sourceCurrency)
-												}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
-													className: "text-[10px] text-slate-500",
-													children: ["Base: ", formatMoney(lineBaseOrig, currentOrder.sourceCurrency)]
-												})]
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("td", {
+												className: "py-2.5 text-right font-mono whitespace-nowrap font-semibold text-slate-900",
+												children: formatMoney(finalLineTotal, currentOrder.finalCurrency)
 											})
 										] }, `${item.inventoryId}-${idx}`);
 									})
 								})]
 							})
 						}),
-						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-							className: "grid grid-cols-1 md:grid-cols-2 gap-4 pt-2",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "p-4 rounded-lg border border-slate-200 bg-slate-50 text-xs space-y-1.5",
-								children: [
-									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("p", {
-										className: "font-semibold text-slate-900",
-										children: "Currency & Percentage Calculation Details"
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex justify-between",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-slate-600",
-											children: "Currency Used for Entry:"
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "font-mono font-semibold",
-											children: currentOrder.sourceCurrency
-										})]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex justify-between",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-slate-600",
-											children: "Exchange Rate Applied:"
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "font-mono font-semibold",
-											children: currentOrder.sourceCurrency !== "PKR" && currentOrder.exchangeRateApplied === 0 ? `Rate = 0 (Original ${currentOrder.finalCurrency})` : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied.toFixed(2)} PKR`
-										})]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex justify-between",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-slate-600",
-											children: "Percentage Markup Used:"
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-											className: "font-mono font-semibold",
-											children: [currentOrder.markupPercentUsed, "%"]
-										})]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex justify-between",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-slate-600",
-											children: "Base Subtotal:"
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "font-mono",
-											children: formatMoney(currentOrder.baseSubtotal, currentOrder.sourceCurrency)
-										})]
-									}),
-									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-										className: "flex justify-between",
-										children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "text-slate-600",
-											children: "Converted Amount:"
-										}), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
-											className: "font-mono",
-											children: currentOrder.sourceCurrency !== "PKR" && currentOrder.exchangeRateApplied === 0 ? `No PKR Conversion (${currentOrder.finalCurrency})` : formatMoney(currentOrder.convertedAmountPkr, "PKR")
-										})]
-									})
-								]
-							}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-								className: "p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 text-xs space-y-2 flex flex-col justify-between",
+						/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
+							className: "flex justify-end pt-2",
+							children: /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								className: "w-full md:w-1/2 p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 text-xs space-y-2 flex flex-col justify-between",
 								children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 									className: "space-y-1.5",
 									children: [
-										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
-											className: "flex justify-between",
-											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-												className: "text-slate-600",
-												children: [
-													"Markup (",
-													currentOrder.markupPercentUsed,
-													"%):"
-												]
-											}), /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", {
-												className: "font-mono",
-												children: ["+ ", formatMoney(currentOrder.markupAmount, currentOrder.finalCurrency)]
-											})]
-										}),
 										/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 											className: "flex justify-between",
 											children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
@@ -103516,7 +103423,7 @@ var InvoiceModal = ({ order, onClose }) => {
 										children: formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)
 									})]
 								})]
-							})]
+							})
 						}),
 						currentOrder.notes && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("p", {
 							className: "text-xs text-slate-600 italic",
@@ -103524,7 +103431,7 @@ var InvoiceModal = ({ order, onClose }) => {
 						}),
 						/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							className: "pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500",
-							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: profile.invoiceFooter }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Authorized Signature: ______________________" })]
+							children: [/* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: profile.invoiceFooter }), /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { children: "Computer generated invoice — no signature required." })]
 						})
 					]
 				})
@@ -139320,8 +139227,8 @@ function registerSW(options = {}) {
 	return updateServiceWorker;
 }
 // src/hooks/useAppUpdater.ts
-var currentBuildId = "20261116220234";
-var currentBuiltAt = "2026-11-16T22:02:34.572Z";
+var currentBuildId = "20261117095315";
+var currentBuiltAt = "2026-11-17T09:53:15.740Z";
 var swRegistration;
 var updateSWFn = null;
 var updateListeners = /* @__PURE__ */ new Set();

@@ -53,10 +53,8 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
     const dispatchLine = isDispatched
       ? `\nDispatch: Dispatched (Expected Arrival: ${currentOrder.expectedArrivalDate || 'N/A'})`
       : '\nDispatch: Pending Dispatch';
-    const isOrigMode =
-      currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0;
     const msg = encodeURIComponent(
-      `Assalam-o-Alaikum ${currentOrder.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${currentOrder.invoiceNo}\nDate: ${currentOrder.orderDate}\nCurrency Used: ${currentOrder.sourceCurrency}\nExchange Rate Applied: ${isOrigMode ? `Rate = 0 (Original ${currentOrder.finalCurrency} Mode)` : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied} PKR`}\nMarkup Applied: ${currentOrder.markupPercentUsed}%\nCourier Charges: ${formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}\n*Final Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}*\nStatus: ${currentOrder.paymentStatus}${dispatchLine}\n\nThank you for your business!`
+      `Assalam-o-Alaikum ${currentOrder.customerName},\n\nInvoice from *${profile.companyName}* (${profile.subtitle})\nInvoice No: ${currentOrder.invoiceNo}\nDate: ${currentOrder.orderDate}\nCourier Charges: ${formatMoney(currentOrder.courierCharges || 0, currentOrder.finalCurrency)}\n*Final Total: ${formatMoney(currentOrder.finalTotal, currentOrder.finalCurrency)}*\nStatus: ${currentOrder.paymentStatus}${dispatchLine}\n\nThank you for your business!`
     );
     window.open(cleanPhone ? `https://wa.me/${cleanPhone}?text=${msg}` : `https://wa.me/?text=${msg}`, '_blank');
   };
@@ -314,7 +312,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             <div className="sm:text-right">
               <p className="font-semibold text-slate-500">SYSTEM & DISPATCH</p>
               <p className="text-slate-800 font-medium mt-1">Aqsa Business Management System</p>
-              <p className="text-slate-600">Prepared by: {currentOrder.createdBy}</p>
+              <p className="text-slate-700 font-medium">Ahmer Iqbal</p>
               <p className="text-slate-600">
                 Bill Currency: <strong className="text-slate-900">{currentOrder.finalCurrency}</strong>
               </p>
@@ -336,20 +334,28 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
                   <th className="py-2.5 pr-3 font-semibold">Cert #</th>
                   <th className="py-2.5 pr-3 font-semibold text-right">Qty</th>
                   <th className="py-2.5 pr-3 font-semibold text-right">
-                    Unit ({currentOrder.sourceCurrency})
+                    Unit ({currentOrder.finalCurrency})
                   </th>
-                  <th className="py-2.5 pr-3 font-semibold text-right">Item %</th>
                   <th className="py-2.5 font-semibold text-right">
-                    Total w/ % ({currentOrder.sourceCurrency})
+                    Total ({currentOrder.finalCurrency})
                   </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {currentOrder.items.map((item, idx) => {
-                  const { percentUsed, lineBaseOrig, lineTotalOrig } = getLineItemAmounts(
+                  const { percentUsed, lineTotalOrig } = getLineItemAmounts(
                     item,
                     currentOrder.markupPercentUsed
                   );
+                  const rateFactor =
+                    currentOrder.sourceCurrency !== currentOrder.finalCurrency &&
+                    currentOrder.exchangeRateApplied > 0
+                      ? currentOrder.exchangeRateApplied
+                      : 1;
+                  const finalUnitPrice =
+                    item.unitPriceOrig * (1 + percentUsed / 100) * rateFactor;
+                  const finalLineTotal = lineTotalOrig * rateFactor;
+
                   return (
                     <tr key={`${item.inventoryId}-${idx}`}>
                       <td className="py-2.5 pr-3 font-mono text-slate-700 whitespace-nowrap">
@@ -364,18 +370,10 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
                       </td>
                       <td className="py-2.5 pr-3 text-right font-mono">{item.quantity}</td>
                       <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
-                        {formatMoney(item.unitPriceOrig, currentOrder.sourceCurrency)}
+                        {formatMoney(finalUnitPrice, currentOrder.finalCurrency)}
                       </td>
-                      <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap text-emerald-800 font-semibold">
-                        +{percentUsed}%
-                      </td>
-                      <td className="py-2.5 text-right font-mono whitespace-nowrap">
-                        <p className="font-semibold text-slate-900">
-                          {formatMoney(lineTotalOrig, currentOrder.sourceCurrency)}
-                        </p>
-                        <p className="text-[10px] text-slate-500">
-                          Base: {formatMoney(lineBaseOrig, currentOrder.sourceCurrency)}
-                        </p>
+                      <td className="py-2.5 text-right font-mono whitespace-nowrap font-semibold text-slate-900">
+                        {formatMoney(finalLineTotal, currentOrder.finalCurrency)}
                       </td>
                     </tr>
                   );
@@ -384,54 +382,10 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             </table>
           </div>
 
-          {/* Mandatory Currency & Percentage Calculation Breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-            <div className="p-4 rounded-lg border border-slate-200 bg-slate-50 text-xs space-y-1.5">
-              <p className="font-semibold text-slate-900">
-                Currency & Percentage Calculation Details
-              </p>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Currency Used for Entry:</span>
-                <span className="font-mono font-semibold">{currentOrder.sourceCurrency}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Exchange Rate Applied:</span>
-                <span className="font-mono font-semibold">
-                  {currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0
-                    ? `Rate = 0 (Original ${currentOrder.finalCurrency})`
-                    : `1 ${currentOrder.sourceCurrency} = ${currentOrder.exchangeRateApplied.toFixed(2)} PKR`}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Percentage Markup Used:</span>
-                <span className="font-mono font-semibold">{currentOrder.markupPercentUsed}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Base Subtotal:</span>
-                <span className="font-mono">
-                  {formatMoney(currentOrder.baseSubtotal, currentOrder.sourceCurrency)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-600">Converted Amount:</span>
-                <span className="font-mono">
-                  {currentOrder.sourceCurrency !== 'PKR' && currentOrder.exchangeRateApplied === 0
-                    ? `No PKR Conversion (${currentOrder.finalCurrency})`
-                    : formatMoney(currentOrder.convertedAmountPkr, 'PKR')}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 text-xs space-y-2 flex flex-col justify-between">
+          {/* Totals Summary */}
+          <div className="flex justify-end pt-2">
+            <div className="w-full md:w-1/2 p-4 rounded-lg border border-emerald-200 bg-emerald-50/50 text-xs space-y-2 flex flex-col justify-between">
               <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">
-                    Markup ({currentOrder.markupPercentUsed}%):
-                  </span>
-                  <span className="font-mono">
-                    + {formatMoney(currentOrder.markupAmount, currentOrder.finalCurrency)}
-                  </span>
-                </div>
                 <div className="flex justify-between">
                   <span className="text-slate-600">Courier Charges:</span>
                   <span className="font-mono font-semibold text-slate-900">
@@ -465,7 +419,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
 
           <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-slate-500">
             <span>{profile.invoiceFooter}</span>
-            <span>Authorized Signature: ______________________</span>
+            <span>Computer generated invoice — no signature required.</span>
           </div>
         </div>
       </div>

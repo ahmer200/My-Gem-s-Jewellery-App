@@ -205,7 +205,7 @@ export function buildInvoicePdfDoc(
   doc.text(`Contact: ${order.customerPhone || 'N/A'}`, 14, 56);
   doc.text(`Address: ${order.customerAddress || 'N/A'}`, 14, 61);
   doc.text(`Payment Status: ${order.paymentStatus}`, 150, 51);
-  doc.text(`Prepared By: ${order.createdBy}`, 150, 56);
+  doc.text('Ahmer Iqbal', 150, 56);
   doc.text(
     order.dispatchStatus === 'Dispatched'
       ? `Dispatch: Dispatched (Arrives: ${order.expectedArrivalDate || 'N/A'})`
@@ -213,6 +213,11 @@ export function buildInvoicePdfDoc(
     14,
     66
   );
+
+  const rateFactor =
+    order.sourceCurrency !== order.finalCurrency && order.exchangeRateApplied > 0
+      ? order.exchangeRateApplied
+      : 1;
 
   autoTable(doc, {
     startY: 72,
@@ -222,9 +227,8 @@ export function buildInvoicePdfDoc(
         'Product & Gemstone Details',
         'Cert #',
         'Qty',
-        `Unit (${order.sourceCurrency})`,
-        'Item %',
-        `Total w/ % (${order.sourceCurrency})`,
+        `Unit (${order.finalCurrency})`,
+        `Total (${order.finalCurrency})`,
       ],
     ],
     body: order.items.map((item) => {
@@ -232,14 +236,16 @@ export function buildInvoicePdfDoc(
         item,
         order.markupPercentUsed
       );
+      const finalUnitPrice =
+        item.unitPriceOrig * (1 + percentUsed / 100) * rateFactor;
+      const finalLineTotal = lineTotalOrig * rateFactor;
       return [
         item.sku,
         `${item.productName}\n${item.gemstoneDetails}`,
         item.certNumber || '—',
         String(item.quantity),
-        formatMoney(item.unitPriceOrig, order.sourceCurrency),
-        `+${percentUsed}%`,
-        formatMoney(lineTotalOrig, order.sourceCurrency),
+        formatMoney(finalUnitPrice, order.finalCurrency),
+        formatMoney(finalLineTotal, order.finalCurrency),
       ];
     }),
     styles: { fontSize: 8.2, cellPadding: 2.3 },
@@ -247,57 +253,36 @@ export function buildInvoicePdfDoc(
   });
 
   const finalY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 125;
-  const boxY = finalY + 8;
+  const boxY = Math.min(finalY + 8, 232);
 
-  doc.setDrawColor(203, 213, 225);
-  doc.setFillColor(248, 250, 252);
-  doc.roundedRect(14, boxY, 182, 52, 2, 2, 'FD');
-
-  doc.setFontSize(9.5);
-  doc.setTextColor(15, 23, 42);
-  doc.text('Currency & Percentage Calculation Breakdown', 18, boxY + 7);
-  doc.setFontSize(8.5);
-  const isOrigMode = order.sourceCurrency !== 'PKR' && order.exchangeRateApplied === 0;
-  doc.text(`Currency Used: ${order.sourceCurrency}`, 18, boxY + 14);
-  doc.text(
-    isOrigMode
-      ? `Exchange Rate Applied: Rate = 0 (Original Currency Mode — ${order.finalCurrency})`
-      : `Exchange Rate Applied: 1 ${order.sourceCurrency} = ${order.exchangeRateApplied.toFixed(2)} PKR`,
-    18,
-    boxY + 20
-  );
-  doc.text(`Percentage Markup Applied: ${order.markupPercentUsed}%`, 18, boxY + 26);
-  doc.text(`Base Amount: ${formatMoney(order.baseSubtotal, order.sourceCurrency)}`, 18, boxY + 32);
-  doc.text(
-    `Converted Amount: ${isOrigMode ? `Original Currency (${order.finalCurrency})` : formatMoney(order.convertedAmountPkr, 'PKR')}`,
-    18,
-    boxY + 38
-  );
+  doc.setDrawColor(167, 243, 208);
+  doc.setFillColor(236, 253, 245);
+  doc.roundedRect(112, boxY, 84, 38, 2, 2, 'FD');
 
   doc.setFontSize(8.5);
   doc.setTextColor(71, 85, 105);
-  doc.text(
-    `Markup (${order.markupPercentUsed}%): + ${formatMoney(order.markupAmount, order.finalCurrency)}`,
-    120,
-    boxY + 14
-  );
   doc.text(
     `Courier Charges: + ${formatMoney(order.courierCharges || 0, order.finalCurrency)}`,
-    120,
-    boxY + 20
+    116,
+    boxY + 8
   );
-  doc.setFontSize(12);
-  doc.setTextColor(6, 78, 59);
-  doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 120, boxY + 30);
-  doc.setFontSize(9);
-  doc.setTextColor(71, 85, 105);
-  doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, 'PKR')}`, 120, boxY + 38);
+  doc.text(`Paid (PKR Eqv): ${formatMoney(order.paidAmountPkr, 'PKR')}`, 116, boxY + 15);
   const duePkr = Math.max(0, order.finalTotalPkrEquivalent - order.paidAmountPkr);
-  doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, 'PKR')}`, 120, boxY + 45);
+  doc.text(`Balance Due (PKR Eqv): ${formatMoney(duePkr, 'PKR')}`, 116, boxY + 22);
+  doc.setFontSize(11.5);
+  doc.setTextColor(6, 78, 59);
+  doc.text(`FINAL TOTAL: ${formatMoney(order.finalTotal, order.finalCurrency)}`, 116, boxY + 32);
+
+  if (order.notes) {
+    doc.setFontSize(8);
+    doc.setTextColor(71, 85, 105);
+    doc.text(`Note: ${order.notes}`, 14, Math.min(boxY + 46, 272));
+  }
 
   doc.setFontSize(8);
   doc.setTextColor(100, 116, 139);
-  doc.text(profile.invoiceFooter, 14, 282);
+  doc.text(profile.invoiceFooter, 14, 280);
+  doc.text('Computer generated invoice — no signature required.', 14, 285);
 
   if (withAutoPrint) {
     doc.autoPrint();
