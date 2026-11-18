@@ -41,7 +41,7 @@ export function buildInventoryRows(items: InventoryItem[], profile: CompanyProfi
       '6. Category': item.category || '—',
       '7. Stock Pieces': item.stockPieces ?? 0,
       '8. Item Unit': item.itemUnit || 'Carats',
-      '9. 1TP Weight': item.oneTpWeight ?? item.weightCarats ?? 0,
+      '9. Item Weight': item.oneTpWeight ?? item.weightCarats ?? 0,
       '10. Batch #': item.batchNumber || '—',
       '11. Stock Quantity': item.stockQty,
       '12. Cent': item.cent ?? 0,
@@ -109,7 +109,7 @@ export function exportInventoryPdf(items: InventoryItem[], profile: CompanyProfi
       '6.Category',
       '7.Pcs',
       '8.Unit',
-      '9.1TP Wt',
+      '9.Item Wt',
       '10.Batch#',
       '11.Qty',
       '12.Cent',
@@ -308,9 +308,21 @@ export function getInvoicePdfPreviewUrl(
 export interface GenericReportExportOptions {
   quantityColumnIndex?: number;
   piecesColumnIndex?: number;
+  sumColumnIndices?: number[];
+  sumColumnDecimals?: Record<number, number>;
+  sumColumnLabels?: Record<number, string>;
   grandTotalRow?: (string | number)[];
   grandTotalText?: string;
   hideMarkupInHeader?: boolean;
+}
+
+function parseNumericCellValue(raw: unknown): number {
+  const str = String(raw ?? '').trim();
+  if (!str || str === '—') return 0;
+  // Strip currency codes / commas / text prefix cleanly while keeping decimal & minus sign
+  const cleaned = str.replace(/,/g, '').replace(/[^0-9.-]/g, ' ').trim().split(/\s+/)[0] || '';
+  const val = Number(cleaned);
+  return Number.isFinite(val) ? val : 0;
 }
 
 export function exportGenericReportExcel(
@@ -364,30 +376,31 @@ export function exportGenericReportPdf(
 
   const qtyIdx = options?.quantityColumnIndex;
   const pcsIdx = options?.piecesColumnIndex;
-  const pageQtyMap = new Map<number, number>();
-  const pagePiecesMap = new Map<number, number>();
-  const pageCountMap = new Map<number, number>();
+  const sumCols: number[] = options?.sumColumnIndices?.length
+    ? options.sumColumnIndices
+    : [
+        ...(typeof pcsIdx === 'number' ? [pcsIdx] : []),
+        ...(typeof qtyIdx === 'number' ? [qtyIdx] : []),
+      ];
 
-  let grandTotalQty = 0;
-  let grandTotalPieces = 0;
-  if (typeof qtyIdx === 'number') {
+  // Track page-wise sums per column index: Map<pageNumber, Map<colIndex, sum>>
+  const pageColSums = new Map<number, Map<number, number>>();
+  const pageCountMap = new Map<number, number>();
+  const grandColSums = new Map<number, number>();
+
+  for (const colIdx of sumCols) {
+    let total = 0;
     for (const r of rows) {
-      const val = Number(String(r[qtyIdx] ?? 0).replace(/,/g, ''));
-      if (Number.isFinite(val)) grandTotalQty += val;
+      total += parseNumericCellValue(r[colIdx]);
     }
-  }
-  if (typeof pcsIdx === 'number') {
-    for (const r of rows) {
-      const val = Number(String(r[pcsIdx] ?? 0).replace(/,/g, ''));
-      if (Number.isFinite(val)) grandTotalPieces += val;
-    }
+    grandColSums.set(colIdx, total);
   }
 
   autoTable(doc, {
     startY: 30,
     head: [headers],
     body: rows.map((r) => r.map((c) => String(c))),
-    margin: { left: sideMargin, right: sideMargin, bottom: 20 },
+    margin: { left: sideMargin, right: sideMargin, bottom: sumCols.length > 3 ? 25 : 20 },
     styles: {
       fontSize: isWide ? 4.7 : 7.5,
       cellPadding: isWide ? 0.85 : 2,
@@ -399,74 +412,76 @@ export function exportGenericReportPdf(
       if (data.column.index === 0) {
         pageCountMap.set(data.pageNumber, (pageCountMap.get(data.pageNumber) || 0) + 1);
       }
-      if (typeof qtyIdx === 'number' && data.column.index === qtyIdx) {
-        const val = Number(String(rows[data.row.index]?.[qtyIdx] ?? 0).replace(/,/g, ''));
-        if (Number.isFinite(val)) {
-          pageQtyMap.set(data.pageNumber, (pageQtyMap.get(data.pageNumber) || 0) + val);
+      if (sumCols.includes(data.column.index)) {
+        const colIdx = data.column.index;
+        const val = parseNumericCellValue(rows[data.row.index]?.[colIdx]);
+        if (!pageColSums.has(data.pageNumber)) {
+          pageColSums.set(data.pageNumber, new Map());
         }
-      }
-      if (typeof pcsIdx === 'number' && data.column.index === pcsIdx) {
-        const val = Number(String(rows[data.row.index]?.[pcsIdx] ?? 0).replace(/,/g, ''));
-        if (Number.isFinite(val)) {
-          pagePiecesMap.set(data.pageNumber, (pagePiecesMap.get(data.pageNumber) || 0) + val);
-        }
+        const m = pageColSums.get(data.pageNumber)!;
+        m.set(colIdx, (m.get(colIdx) || 0) + val);
       }
     },
   });
 
+  const formatColSum = (colIdx: number, val: number) => {
+    const decimals = options?.sumColumnDecimals?.[colIdx] ?? 2;
+    return Number(val.toFixed(decimals)).toLocaleString(undefined, {
+      minimumFractionDigits: decimals > 0 && Math.abs(val % 1) > 0.001 ? decimals : 0,
+      maximumFractionDigits: decimals,
+    });
+  };
+
   // Grand Total block on the very last page
-  if (options?.grandTotalText || typeof qtyIdx === 'number') {
+  if (options?.grandTotalText || sumCols.length > 0) {
     const lastY =
       (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY || 40;
     let targetY = lastY + 4;
-    if (targetY > pageHeight - 32) {
+    if (targetY > pageHeight - 34) {
       doc.addPage();
       targetY = 18;
     }
 
     const boxWidth = pageWidth - sideMargin * 2;
-    doc.setDrawColor(6, 78, 59);
-    doc.setFillColor(236, 253, 245);
-    doc.roundedRect(sideMargin, targetY, boxWidth, 10, 1.5, 1.5, 'FD');
-    doc.setFontSize(8.5);
-    doc.setTextColor(6, 78, 59);
     const summaryText =
       options?.grandTotalText ||
-      `GRAND TOTAL (All Pages) — Total Stock Quantity: ${Number(grandTotalQty.toFixed(2))}${
-        typeof pcsIdx === 'number' ? `  |  Total Stock Pieces: ${Number(grandTotalPieces.toFixed(0))}` : ''
-      }`;
-    doc.text(summaryText, sideMargin + 3, targetY + 6.5);
+      `GRAND TOTAL (All Pages) — ${sumCols
+        .map((c) => `${options?.sumColumnLabels?.[c] || headers[c]}: ${formatColSum(c, grandColSums.get(c) || 0)}`)
+        .join('  |  ')}`;
+
+    const wrapped = doc.splitTextToSize(summaryText, boxWidth - 6) as string[];
+    const boxHeight = Math.max(10, wrapped.length * 4.5 + 5);
+
+    doc.setDrawColor(6, 78, 59);
+    doc.setFillColor(236, 253, 245);
+    doc.roundedRect(sideMargin, targetY, boxWidth, boxHeight, 1.5, 1.5, 'FD');
+    doc.setFontSize(8.2);
+    doc.setTextColor(6, 78, 59);
+    doc.text(wrapped, sideMargin + 3, targetY + 6);
   }
 
-  // Draw Per-Page Quantity Total at bottom of EVERY page + Grand Total summary on last page
+  // Draw Per-Page Totals at bottom of EVERY single page
   const totalPages = doc.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
     doc.setPage(p);
-    const footerY = pageHeight - 10;
+    const footerY = sumCols.length > 3 ? pageHeight - 14 : pageHeight - 10;
     doc.setDrawColor(203, 213, 225);
     doc.line(sideMargin, footerY - 4, pageWidth - sideMargin, footerY - 4);
-    doc.setFontSize(8);
+    doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
 
-    const pQty = Number((pageQtyMap.get(p) || 0).toFixed(2));
-    const pPcs = Number((pagePiecesMap.get(p) || 0).toFixed(0));
     const pCount = pageCountMap.get(p) || 0;
+    const pSums = pageColSums.get(p) || new Map<number, number>();
 
-    const leftFooter =
-      typeof qtyIdx === 'number'
-        ? `Page ${p} of ${totalPages}  |  Items: ${pCount}${
-            typeof pcsIdx === 'number' ? `  |  Page Pieces Total: ${pPcs}` : ''
-          }  |  Page Stock Quantity Total: ${pQty}`
-        : `Page ${p} of ${totalPages}  |  Rows on Page: ${pCount}`;
-
-    doc.text(leftFooter, sideMargin, footerY);
-
-    if (typeof qtyIdx === 'number') {
-      const rightFooter =
-        p === totalPages
-          ? `Grand Total Qty (Final): ${Number(grandTotalQty.toFixed(2))}`
-          : `Running Grand Total Qty: ${Number(grandTotalQty.toFixed(2))}`;
-      doc.text(rightFooter, pageWidth - sideMargin, footerY, { align: 'right' });
+    if (sumCols.length > 0) {
+      const colParts = sumCols.map(
+        (c) => `${options?.sumColumnLabels?.[c] || headers[c]}: ${formatColSum(c, pSums.get(c) || 0)}`
+      );
+      const footerLine = `Page ${p} of ${totalPages} (${pCount} items)  |  Page Sums → ${colParts.join('  |  ')}`;
+      const wrappedFooter = doc.splitTextToSize(footerLine, pageWidth - sideMargin * 2) as string[];
+      doc.text(wrappedFooter, sideMargin, footerY);
+    } else {
+      doc.text(`Page ${p} of ${totalPages}  |  Rows on Page: ${pCount}`, sideMargin, footerY);
     }
   }
 

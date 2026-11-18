@@ -1,4 +1,5 @@
 import {
+  CategoryDefinition,
   CompanyProfile,
   InventoryItem,
   PartyAccount,
@@ -9,11 +10,59 @@ import {
   ReturnRecord,
   SalesOrder,
   StaffAccount,
+  SubscriptionState,
 } from '../types/business';
 
 import { DEFAULT_CURRENCY_RATES_PKR } from './worldCurrencies';
 
 export const DEFAULT_LOGO_PATH = '/src/assets/images/na_gems_emblem_1794696118590.jpg';
+
+export const ADMIN_EMAIL = 'ahmer.iqbal.khan@gmail.com';
+
+export const INITIAL_ITEM_UNITS: string[] = [
+  'Carats',
+  'Pieces',
+  'Grams',
+  'Parcel',
+  'Lot',
+  'Ratti',
+  'Box',
+  'Tola',
+];
+
+export const SUBSCRIPTION_PLANS = {
+  monthly: {
+    id: 'monthly' as const,
+    name: 'Monthly Plan',
+    nameUr: 'ماہانہ پلان',
+    pricePkr: 4500,
+    durationDays: 30,
+    billingLabel: '4500 PKR / Month',
+  },
+  yearly: {
+    id: 'yearly' as const,
+    name: 'Yearly Plan',
+    nameUr: 'سالانہ پلان',
+    pricePkr: 35000,
+    durationDays: 365,
+    billingLabel: '35000 PKR / Year',
+  },
+};
+
+export const PAYMENT_ACCOUNT_DETAILS = {
+  easyPaisaNumber: '03320001602',
+  bankName: 'Meezan Bank',
+  accountTitle: 'AHMER IQBAL',
+  accountNumber: '16020109874519',
+  iban: 'PK54MEZN0016020109874519',
+  branch: 'LATIFABAD BRANCH-HYD',
+};
+
+export const INITIAL_SUBSCRIPTION: SubscriptionState = {
+  plan: 'free',
+  status: 'free',
+  updatedAt: '2026-10-01T08:00:00.000Z',
+};
 
 export const INITIAL_PROFILE: CompanyProfile = {
   companyName: "N.A GEM'S",
@@ -596,5 +645,64 @@ export const INITIAL_PARTIES: PartyAccount[] = [
     notes: 'Supplies Swat rough & cut emerald parcels; also buys mountings.',
     createdAt: '2026-10-15T11:00:00.000Z',
     updatedAt: '2026-11-04T12:00:00.000Z',
+  },
+];
+
+export const INITIAL_CATEGORIES: CategoryDefinition[] = [
+  {
+    id: 'cat-loose-gem',
+    name: 'Loose Gemstone',
+    nameUr: 'کھلا نگینہ / قیمتی پتھر',
+    subCategories: ['Faceted Single', 'Calibrated', 'Cabochon', 'Matched Pair'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-lot-parcel',
+    name: 'Lot / Parcel',
+    nameUr: 'لاٹ / پارسل',
+    subCategories: ['Emerald Parcel', 'Ruby Parcel', 'Sapphire Parcel', 'Mixed Parcel'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-rough-stone',
+    name: 'Rough Stone',
+    nameUr: 'خام پتھر',
+    subCategories: ['Facet Grade Rough', 'Cabochon Rough', 'Raw Specimen'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-ring',
+    name: 'Jewelry Ring',
+    nameUr: 'انگوٹھی / جیولری',
+    subCategories: ['18K Gold Ring', 'Silver Ring', 'Signet Ring'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-necklace',
+    name: 'Necklace',
+    nameUr: 'ہار / نیکلس',
+    subCategories: ['Beads Strand', 'Bridal Set', 'Pendant'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-bracelet',
+    name: 'Bracelet',
+    nameUr: 'بریسلیٹ / کڑا',
+    subCategories: ['Tennis Bracelet', 'Stone Beads', 'Bangle'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
+  },
+  {
+    id: 'cat-earrings',
+    name: 'Earrings',
+    nameUr: 'جھمکے / کانٹے',
+    subCategories: ['Studs', 'Drop Earrings'],
+    createdAt: '2026-10-01T08:00:00.000Z',
+    updatedAt: '2026-10-01T08:00:00.000Z',
   },
 ];

@@ -15,6 +15,63 @@ export type PermissionKey =
   | 'edit_rates_profile'
   | 'manage_users';
 
+export interface CategoryDefinition {
+  id: string;
+  name: string;
+  nameUr?: string;
+  subCategories: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type UiLanguage = 'en' | 'ur_en';
+
+export type SubscriptionPlan = 'free' | 'monthly' | 'yearly';
+
+export type SubscriptionStatus =
+  | 'free'
+  | 'pending_verification'
+  | 'active'
+  | 'expired'
+  | 'rejected';
+
+export type SubscriptionFeatureKey =
+  | 'stock_photo_upload'
+  | 'daily_movement_report'
+  | 'daily_amount_report'
+  | 'category_management'
+  | 'full_invoicing';
+
+export interface SubscriptionState {
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  startDate?: string;
+  expiryDate?: string;
+  lastPaymentMethod?: 'EasyPaisa' | 'Meezan Bank IBFT / Raast';
+  lastTransactionId?: string;
+  updatedAt: string;
+}
+
+export interface PaymentVerificationRequest {
+  id: string;
+  ownerId: string;
+  userEmail: string;
+  userName: string;
+  companyName: string;
+  planType: 'monthly' | 'yearly';
+  amountPkr: number;
+  paymentMethod: 'EasyPaisa' | 'Meezan Bank IBFT / Raast';
+  transactionId: string;
+  senderAccount: string;
+  status: 'pending' | 'verified' | 'rejected';
+  adminNote?: string;
+  submittedDate: string;
+  startDate?: string;
+  expiryDate?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface CompanyProfile {
   companyName: string;
   subtitle: string;
@@ -25,6 +82,9 @@ export interface CompanyProfile {
   ntn: string;
   defaultCurrency: CurrencyCode;
   currencyRates: Record<string, number>;
+  customCategoriesJson?: string;
+  customUnitsJson?: string;
+  subscriptionJson?: string;
   rmbToPkr?: number;
   usdToPkr?: number;
   defaultMarkupPercent: number;
@@ -237,6 +297,7 @@ export interface PartyAccount {
 export type ModuleId =
   | 'dashboard'
   | 'inventory'
+  | 'categories'
   | 'purchases'
   | 'sales'
   | 'parties'
@@ -246,6 +307,7 @@ export type ModuleId =
   | 'reminders'
   | 'reports'
   | 'users'
+  | 'subscription'
   | 'settings';
 
 export interface AqsaAndroidBridgeApi {

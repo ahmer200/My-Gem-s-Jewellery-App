@@ -29,7 +29,9 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.webkit.WebViewAssetLoader
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -46,16 +48,40 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private var pendingPermissionRequest: PermissionRequest? = null
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private var pendingCameraImageUri: Uri? = null
+    private var pendingCameraFileLaunch = false
     private var loadedFallback = false
     private val executor = Executors.newSingleThreadExecutor()
+
+    private val takeCameraPhotoLauncher = registerForActivityResult(
+        ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = pendingCameraImageUri
+        if (success && uri != null) {
+            filePathCallback?.onReceiveValue(arrayOf(uri))
+        } else {
+            filePathCallback?.onReceiveValue(emptyArray())
+        }
+        filePathCallback = null
+        pendingCameraImageUri = null
+    }
 
     private val requestCameraPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             pendingPermissionRequest?.grant(pendingPermissionRequest?.resources)
+            if (pendingCameraFileLaunch) {
+                pendingCameraFileLaunch = false
+                launchNativeCameraCapture()
+            }
         } else {
             pendingPermissionRequest?.deny()
+            if (pendingCameraFileLaunch) {
+                pendingCameraFileLaunch = false
+                filePathCallback?.onReceiveValue(emptyArray())
+                filePathCallback = null
+            }
         }
         pendingPermissionRequest = null
     }
@@ -65,6 +91,17 @@ class MainActivity : AppCompatActivity() {
     ) { uris ->
         filePathCallback?.onReceiveValue(uris.toTypedArray())
         filePathCallback = null
+    }
+
+    private fun launchNativeCameraCapture() {
+        val photoFile = File(cacheDir, "stock_cam_${System.currentTimeMillis()}.jpg")
+        val uri = FileProvider.getUriForFile(
+            this,
+            "${applicationContext.packageName}.fileprovider",
+            photoFile
+        )
+        pendingCameraImageUri = uri
+        takeCameraPhotoLauncher.launch(uri)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -163,8 +200,27 @@ class MainActivity : AppCompatActivity() {
                 filePathCallback: ValueCallback<Array<Uri>>?,
                 fileChooserParams: FileChooserParams?
             ): Boolean {
+                this@MainActivity.filePathCallback?.onReceiveValue(emptyArray())
                 this@MainActivity.filePathCallback = filePathCallback
-                fileChooserLauncher.launch("*/*")
+
+                val isCapture = fileChooserParams?.isCaptureEnabled == true
+                if (isCapture) {
+                    if (ContextCompat.checkSelfPermission(
+                            this@MainActivity,
+                            Manifest.permission.CAMERA
+                        ) == PackageManager.PERMISSION_GRANTED
+                    ) {
+                        launchNativeCameraCapture()
+                    } else {
+                        pendingCameraFileLaunch = true
+                        requestCameraPermission.launch(Manifest.permission.CAMERA)
+                    }
+                    return true
+                }
+
+                val acceptTypes = fileChooserParams?.acceptTypes ?: emptyArray()
+                val mime = if (acceptTypes.any { it.contains("image") }) "image/*" else "*/*"
+                fileChooserLauncher.launch(mime)
                 return true
             }
 

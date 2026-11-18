@@ -49,7 +49,8 @@ service cloud.firestore {
       return data.keys().hasAll(['ownerId', 'companyName', 'rmbToPkr', 'usdToPkr', 'defaultMarkupPercent', 'createdAt', 'updatedAt'])
         && data.keys().hasOnly([
           'ownerId', 'companyName', 'subtitle', 'address', 'contact', 'whatsapp',
-          'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'rmbToPkr', 'usdToPkr',
+          'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'customCategoriesJson',
+          'customUnitsJson', 'subscriptionJson', 'rmbToPkr', 'usdToPkr',
           'defaultMarkupPercent', 'invoiceFooter', 'logoDataUrl', 'createdAt', 'updatedAt'
         ])
         && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
@@ -63,6 +64,9 @@ service cloud.firestore {
         && (!('ntn' in data) || (data.ntn is string && data.ntn.size() <= 64))
         && (!('defaultCurrency' in data) || isValidCurrency(data.defaultCurrency))
         && (!('currencyRatesJson' in data) || (data.currencyRatesJson is string && data.currencyRatesJson.size() <= 8000))
+        && (!('customCategoriesJson' in data) || (data.customCategoriesJson is string && data.customCategoriesJson.size() <= 16000))
+        && (!('customUnitsJson' in data) || (data.customUnitsJson is string && data.customUnitsJson.size() <= 4000))
+        && (!('subscriptionJson' in data) || (data.subscriptionJson is string && data.subscriptionJson.size() <= 4000))
         && data.rmbToPkr is number && data.rmbToPkr >= 0
         && data.usdToPkr is number && data.usdToPkr >= 0
         && data.defaultMarkupPercent is number && data.defaultMarkupPercent >= 0 && data.defaultMarkupPercent <= 1000
@@ -296,10 +300,60 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidSubscriptionRequest(data) {
+      return data.keys().hasAll([
+          'ownerId', 'planType', 'amountPkr', 'paymentMethod', 'transactionId',
+          'status', 'submittedDate', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'userEmail', 'userName', 'companyName', 'planType',
+          'amountPkr', 'paymentMethod', 'transactionId', 'senderAccount',
+          'status', 'adminNote', 'submittedDate', 'startDate', 'expiryDate',
+          'createdAt', 'updatedAt'
+        ])
+        && data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128
+        && (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 160))
+        && (!('userName' in data) || (data.userName is string && data.userName.size() <= 120))
+        && (!('companyName' in data) || (data.companyName is string && data.companyName.size() <= 160))
+        && data.planType is string && data.planType in ['monthly', 'yearly']
+        && data.amountPkr is number && data.amountPkr in [4500, 35000]
+        && data.paymentMethod is string && data.paymentMethod.size() >= 2 && data.paymentMethod.size() <= 60
+        && data.transactionId is string && data.transactionId.size() >= 2 && data.transactionId.size() <= 120
+        && (!('senderAccount' in data) || (data.senderAccount is string && data.senderAccount.size() <= 120))
+        && data.status is string && data.status in ['pending', 'verified', 'rejected']
+        && (!('adminNote' in data) || (data.adminNote is string && data.adminNote.size() <= 300))
+        && data.submittedDate is string && data.submittedDate.size() >= 4 && data.submittedDate.size() <= 40
+        && (!('startDate' in data) || (data.startDate is string && data.startDate.size() <= 40))
+        && (!('expiryDate' in data) || (data.expiryDate is string && data.expiryDate.size() <= 40))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // Admins collection (read own status or admin)
     match /admins/{adminId} {
       allow get: if isSignedIn() && isValidId(adminId) && (adminId == request.auth.uid || isAdmin());
       allow list, create, update, delete: if false;
+    }
+
+    // Subscription payment verification queue
+    match /subscriptionRequests/{requestId} {
+      allow get: if isSignedIn() && isValidId(requestId) && (existing().ownerId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && isValidId(requestId)
+        && isValidSubscriptionRequest(incoming())
+        && incoming().ownerId == request.auth.uid
+        && incoming().status == 'pending'
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isAdmin() && isValidId(requestId)
+        && isValidSubscriptionRequest(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'status', 'adminNote', 'startDate', 'expiryDate', 'updatedAt'
+        ]);
+      allow delete: if isAdmin() && isValidId(requestId);
     }
 
     // Workspaces & Subcollections
@@ -331,7 +385,8 @@ service cloud.firestore {
           && incoming().updatedAt == request.time
           && incoming().diff(existing()).affectedKeys().hasOnly([
             'companyName', 'subtitle', 'address', 'contact', 'whatsapp',
-            'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'rmbToPkr', 'usdToPkr',
+            'email', 'ntn', 'defaultCurrency', 'currencyRatesJson', 'customCategoriesJson',
+            'customUnitsJson', 'subscriptionJson', 'rmbToPkr', 'usdToPkr',
             'defaultMarkupPercent', 'invoiceFooter', 'logoDataUrl', 'updatedAt'
           ]);
         allow delete: if isSignedIn() && isValidId(workspaceId) && isValidId(settingId)

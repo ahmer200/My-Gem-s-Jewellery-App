@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import {
+  AlertTriangle,
   BarChart3,
   BellRing,
   Cloud,
   Contact,
+  Crown,
   Gem,
+  Languages,
   LayoutDashboard,
+  Lock,
   Menu,
   Moon,
   QrCode,
@@ -14,6 +18,7 @@ import {
   Settings,
   ShoppingBag,
   Sun,
+  Tags,
   Users,
   Wallet,
   X,
@@ -22,6 +27,7 @@ import { BusinessProvider, useBusiness } from './context/BusinessContext';
 import { ModuleId } from './types/business';
 import { DashboardView } from './modules/DashboardView';
 import { InventoryView } from './modules/InventoryView';
+import { CategoriesView } from './modules/CategoriesView';
 import { PurchasesView } from './modules/PurchasesView';
 import { SalesView } from './modules/SalesView';
 import { PartiesView } from './modules/PartiesView';
@@ -32,13 +38,16 @@ import { RemindersView } from './modules/RemindersView';
 import { ReportsView } from './modules/ReportsView';
 import { UsersView } from './modules/UsersView';
 import { SettingsView } from './modules/SettingsView';
+import { SubscriptionView } from './modules/SubscriptionView';
 import { AppUpdateBanner, OfflineIndicator, PWAInstallButton } from './components/PWAControls';
 import { getRateForCurrency } from './utils/currency';
 import { normalizeCurrencyCode } from './utils/worldCurrencies';
+import { bi, MODULE_URDU_LABELS } from './utils/bilingual';
 
 const NAV_ITEMS: { id: ModuleId; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', shortLabel: 'Home', icon: LayoutDashboard },
   { id: 'inventory', label: 'Inventory', shortLabel: 'Stock', icon: Gem },
+  { id: 'categories', label: 'Categories', shortLabel: 'Cat.', icon: Tags },
   { id: 'sales', label: 'Sales & Invoices', shortLabel: 'Sales', icon: Receipt },
   { id: 'parties', label: 'Customers & Vendors', shortLabel: 'Parties', icon: Contact },
   { id: 'scanner', label: 'QR / Barcode Scan', shortLabel: 'Scan', icon: QrCode },
@@ -47,6 +56,7 @@ const NAV_ITEMS: { id: ModuleId; label: string; shortLabel: string; icon: React.
   { id: 'payments', label: 'Payments & Dues', shortLabel: 'Cash', icon: Wallet },
   { id: 'reminders', label: 'Auto Reminders', shortLabel: 'Remind', icon: BellRing },
   { id: 'reports', label: 'Reports & Export', shortLabel: 'Reports', icon: BarChart3 },
+  { id: 'subscription', label: 'Subscription & Pay', shortLabel: 'Plan', icon: Crown },
   { id: 'users', label: 'Multi-User Access', shortLabel: 'Users', icon: Users },
   { id: 'settings', label: 'Profile, Sync & APK', shortLabel: 'Setup', icon: Settings },
 ];
@@ -59,12 +69,18 @@ const AppShell: React.FC = () => {
     activeOperator,
     theme,
     toggleTheme,
+    uiLanguage,
+    toggleUiLanguage,
     toasts,
     firebaseUser,
     isSyncing,
     liveSyncActive,
     syncNowToCloud,
     cloudSignIn,
+    subscription,
+    isProUnlocked,
+    daysUntilExpiry,
+    isExpiringSoon,
   } = useBusiness();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -129,7 +145,9 @@ const AppShell: React.FC = () => {
                 }`}
               >
                 <Icon className="w-4 h-4 shrink-0" />
-                <span className="truncate">{item.label}</span>
+                <span className="truncate">
+                  {bi(item.label, MODULE_URDU_LABELS[item.id] || item.label, uiLanguage)}
+                </span>
               </button>
             );
           })}
@@ -188,7 +206,9 @@ const AppShell: React.FC = () => {
                     }`}
                   >
                     <Icon className="w-4 h-4 shrink-0" />
-                    <span>{item.label}</span>
+                    <span>
+                      {bi(item.label, MODULE_URDU_LABELS[item.id] || item.label, uiLanguage)}
+                    </span>
                   </button>
                 );
               })}
@@ -210,7 +230,7 @@ const AppShell: React.FC = () => {
               <Menu className="w-5 h-5" />
             </button>
             <span className="font-display text-sm md:text-base font-bold text-slate-900 dark:text-white truncate">
-              {activeNav.label}
+              {bi(activeNav.label, MODULE_URDU_LABELS[activeNav.id] || activeNav.label, uiLanguage)}
             </span>
           </div>
 
@@ -224,6 +244,15 @@ const AppShell: React.FC = () => {
 
           <div className="flex items-center gap-2 shrink-0">
             <PWAInstallButton />
+            <button
+              type="button"
+              onClick={toggleUiLanguage}
+              title="Toggle Urdu + English UI / اردو اور انگریزی زبان تبدیل کریں"
+              className="flex items-center gap-1 rounded-lg border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap min-h-[38px]"
+            >
+              <Languages className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
+              <span>{uiLanguage === 'ur_en' ? 'اردو + EN' : 'EN'}</span>
+            </button>
             <button
               onClick={firebaseUser ? syncNowToCloud : cloudSignIn}
               disabled={isSyncing}
@@ -249,9 +278,65 @@ const AppShell: React.FC = () => {
         </header>
 
         {/* Active Module Viewport */}
-        <main className="flex-1 p-4 md:p-6 pb-24 lg:pb-8 max-w-[1600px] w-full mx-auto">
+        <main className="flex-1 p-4 md:p-6 pb-24 lg:pb-8 max-w-[1600px] w-full mx-auto space-y-5">
+          {subscription.status === 'expired' ? (
+            <div className="no-print rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-rose-900 dark:text-rose-200">
+                <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span>
+                  <strong>Subscription Expired</strong> ({subscription.expiryDate || 'Renew required'}). Renew Monthly (4500 PKR) or Yearly (35000 PKR) to restore locked Pro reports, images &amp; invoicing.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectModule('subscription')}
+                className="px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold whitespace-nowrap"
+              >
+                Renew Now
+              </button>
+            </div>
+          ) : isExpiringSoon ? (
+            <div className="no-print rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/35 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5 text-amber-950 dark:text-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>
+                  <strong>Subscription Expiry Reminder:</strong> Expires in{' '}
+                  <span className="font-mono font-bold">{daysUntilExpiry ?? 0}</span> day(s) ({subscription.expiryDate}). Renew via EasyPaisa (03320001602) or Meezan Bank.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectModule('subscription')}
+                className="px-3.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold whitespace-nowrap"
+              >
+                Extend Subscription
+              </button>
+            </div>
+          ) : !isProUnlocked && activeModule !== 'subscription' ? (
+            <div className="no-print rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>
+                  <strong>Free / Basic Plan</strong> (Company Name &amp; Limited Reports active) · Upgrade for{' '}
+                  <span className="font-mono font-semibold">4500 PKR/mo</span> or{' '}
+                  <span className="font-mono font-semibold">35000 PKR/yr</span> via EasyPaisa{' '}
+                  <span className="font-mono">03320001602</span> / Meezan Bank
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleSelectModule('subscription')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold whitespace-nowrap"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                Upgrade / Pay Now
+              </button>
+            </div>
+          ) : null}
+
           {activeModule === 'dashboard' && <DashboardView />}
           {activeModule === 'inventory' && <InventoryView />}
+          {activeModule === 'categories' && <CategoriesView />}
           {activeModule === 'purchases' && <PurchasesView />}
           {activeModule === 'sales' && <SalesView />}
           {activeModule === 'parties' && <PartiesView />}
@@ -260,6 +345,7 @@ const AppShell: React.FC = () => {
           {activeModule === 'payments' && <PaymentsView />}
           {activeModule === 'reminders' && <RemindersView />}
           {activeModule === 'reports' && <ReportsView />}
+          {activeModule === 'subscription' && <SubscriptionView />}
           {activeModule === 'users' && <UsersView />}
           {activeModule === 'settings' && <SettingsView />}
         </main>

@@ -19,11 +19,23 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
     dispatchSale,
     openSaleForEdit,
     hasPermission,
+    isFeatureLocked,
+    setActiveModule,
     notify,
   } = useBusiness();
   const currentOrder = sales.find((s) => s.id === order.id) || order;
   const isDispatched = currentOrder.dispatchStatus === 'Dispatched';
   const canEditSales = hasPermission('create_sales');
+  const isInvoicingLocked = isFeatureLocked('full_invoicing');
+
+  const requireProInvoicing = () => {
+    notify(
+      'Invoice editing, WhatsApp sharing, printing, and PDF export require the Paid Subscription (4500 PKR / Month or 35000 PKR / Year).',
+      'info'
+    );
+    onClose();
+    setActiveModule('subscription');
+  };
 
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [viewMode, setViewMode] = useState<'sheet' | 'pdfPreview'>('sheet');
@@ -153,7 +165,7 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {canEditSales && !isDispatched && (
+            {canEditSales && !isDispatched && !isInvoicingLocked && (
               <>
                 <button
                   type="button"
@@ -179,35 +191,41 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, onClose }) =>
             <button
               type="button"
               onClick={() =>
-                viewMode === 'sheet' ? openPdfPrintPreview(false) : setViewMode('sheet')
+                isInvoicingLocked
+                  ? requireProInvoicing()
+                  : viewMode === 'sheet'
+                    ? openPdfPrintPreview(false)
+                    : setViewMode('sheet')
               }
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[38px]"
             >
-              <Eye className="w-3.5 h-3.5" />
+              {isInvoicingLocked ? <Lock className="w-3.5 h-3.5 text-amber-600" /> : <Eye className="w-3.5 h-3.5" />}
               {viewMode === 'sheet' ? 'A4 Print Preview' : 'Invoice View'}
             </button>
             <button
               type="button"
-              onClick={shareWhatsApp}
+              onClick={() => (isInvoicingLocked ? requireProInvoicing() : shareWhatsApp())}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-xs font-medium text-white hover:bg-emerald-700 whitespace-nowrap shrink-0 min-h-[38px]"
             >
-              <MessageCircle className="w-3.5 h-3.5" />
+              {isInvoicingLocked ? <Lock className="w-3.5 h-3.5" /> : <MessageCircle className="w-3.5 h-3.5" />}
               WhatsApp Bill
             </button>
             <button
               type="button"
-              onClick={() => exportInvoicePdf(currentOrder, profile)}
+              onClick={() =>
+                isInvoicingLocked ? requireProInvoicing() : exportInvoicePdf(currentOrder, profile)
+              }
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[38px]"
             >
-              <FileDown className="w-3.5 h-3.5" />
+              {isInvoicingLocked ? <Lock className="w-3.5 h-3.5 text-amber-600" /> : <FileDown className="w-3.5 h-3.5" />}
               Save PDF
             </button>
             <button
               type="button"
-              onClick={handlePrintInvoice}
+              onClick={() => (isInvoicingLocked ? requireProInvoicing() : handlePrintInvoice())}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900 dark:bg-emerald-700 text-xs font-medium text-white hover:bg-slate-800 whitespace-nowrap shrink-0 min-h-[38px]"
             >
-              <Printer className="w-3.5 h-3.5" />
+              {isInvoicingLocked ? <Lock className="w-3.5 h-3.5" /> : <Printer className="w-3.5 h-3.5" />}
               Print Invoice
             </button>
             <button

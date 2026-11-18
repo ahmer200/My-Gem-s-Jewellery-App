@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Calculator,
+  Crown,
   Edit3,
   FileDown,
   Lock,
@@ -12,6 +13,7 @@ import {
   Truck,
   X,
 } from 'lucide-react';
+import { bi } from '../utils/bilingual';
 import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode, SalesLineItem, SalesOrder } from '../types/business';
 import {
@@ -40,6 +42,8 @@ export const SalesView: React.FC = () => {
     dispatchSale,
     deleteSale,
     hasPermission,
+    isFeatureLocked,
+    uiLanguage,
     posQueuedSku,
     setPosQueuedSku,
     queuedEditSaleId,
@@ -50,6 +54,15 @@ export const SalesView: React.FC = () => {
 
   const canCreate = hasPermission('create_sales');
   const canViewProfit = hasPermission('view_profit');
+  const isInvoicingLocked = isFeatureLocked('full_invoicing');
+
+  const promptUpgradeInvoicing = () => {
+    notify(
+      'Full Invoicing & PDF export are locked on Free/Basic plan. Pay via EasyPaisa (03320001602) or Meezan Bank to unlock.',
+      'info'
+    );
+    setActiveModule('subscription');
+  };
 
   const [editingSaleId, setEditingSaleId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('');
@@ -368,8 +381,38 @@ export const SalesView: React.FC = () => {
         </button>
       </div>
 
-      {/* New / Edit Sales Order Builder */}
-      {canCreate && (
+      {/* Free Plan Lock Gate or New / Edit Sales Order Builder */}
+      {isInvoicingLocked ? (
+        <div className="rounded-xl bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 flex items-center justify-center shrink-0">
+              <Lock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            </div>
+            <div className="space-y-1">
+              <h2 className="font-display text-sm font-bold text-slate-900 dark:text-white">
+                {bi(
+                  'Complete Invoice Builder, Editing, Dispatch & PDF Export Locked (Free / Basic)',
+                  'مکمل انوائس سسٹم مفت ورژن میں لاک ہے',
+                  uiLanguage
+                )}
+              </h2>
+              <p className="text-xs text-slate-600 dark:text-slate-400 max-w-2xl leading-relaxed">
+                Free users can view historical sales summaries below and edit the Company Name in Settings. Upgrade to{' '}
+                <strong>Monthly (4500 PKR / Month)</strong> or <strong>Yearly (35000 PKR / Year)</strong> via EasyPaisa (
+                <span className="font-mono">03320001602</span>) or Meezan Bank to unlock invoice creation, WhatsApp billing, dispatch locking, and A4 PDF export.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveModule('subscription')}
+            className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 px-4 py-2.5 text-xs font-semibold text-white whitespace-nowrap shrink-0 min-h-[40px]"
+          >
+            <Crown className="w-4 h-4" />
+            Unlock Full Version
+          </button>
+        </div>
+      ) : canCreate && (
         <form
           onSubmit={handleCreateOrUpdateInvoice}
           className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-5"
@@ -960,7 +1003,7 @@ export const SalesView: React.FC = () => {
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1">
-                        {canCreate && !isDispatched && (
+                        {!isInvoicingLocked && canCreate && !isDispatched && (
                           <>
                             <button
                               type="button"
@@ -992,13 +1035,19 @@ export const SalesView: React.FC = () => {
                         </button>
                         <button
                           type="button"
-                          onClick={() => exportInvoicePdf(sale, profile)}
+                          onClick={() =>
+                            isInvoicingLocked ? promptUpgradeInvoicing() : exportInvoicePdf(sale, profile)
+                          }
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium"
                         >
-                          <FileDown className="w-3.5 h-3.5" />
+                          {isInvoicingLocked ? (
+                            <Lock className="w-3.5 h-3.5 text-amber-600" />
+                          ) : (
+                            <FileDown className="w-3.5 h-3.5" />
+                          )}
                           PDF
                         </button>
-                        {canCreate && (
+                        {!isInvoicingLocked && canCreate && (
                           <DeleteActionButton
                             onConfirm={() => deleteSale(sale.id)}
                             title={`Delete invoice ${sale.invoiceNo}`}

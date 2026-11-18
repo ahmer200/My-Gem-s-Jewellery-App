@@ -1,11 +1,13 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import {
+  CategoryDefinition,
   CompanyProfile,
   InventoryItem,
   ModuleId,
   PartyAccount,
   PaymentRecord,
+  PaymentVerificationRequest,
   PermissionKey,
   PurchaseRecord,
   ReminderLog,
@@ -13,9 +15,15 @@ import {
   ReturnRecord,
   SalesOrder,
   StaffAccount,
+  SubscriptionFeatureKey,
+  SubscriptionState,
+  UiLanguage,
 } from '../types/business';
 import {
+  ADMIN_EMAIL,
+  INITIAL_CATEGORIES,
   INITIAL_INVENTORY,
+  INITIAL_ITEM_UNITS,
   INITIAL_PARTIES,
   INITIAL_PAYMENTS,
   INITIAL_PROFILE,
@@ -25,8 +33,11 @@ import {
   INITIAL_RETURNS,
   INITIAL_SALES,
   INITIAL_STAFF,
+  INITIAL_SUBSCRIPTION,
+  SUBSCRIPTION_PLANS,
 } from '../utils/seedData';
 import {
+  adminUpdateSubscriptionRequestStatus,
   auth,
   CloudKnownState,
   deleteCloudDocument,
@@ -34,20 +45,37 @@ import {
   pushWorkspaceToCloud,
   signInWithGoogle,
   signOutFirebase,
+  submitSubscriptionRequestToCloud,
+  subscribeToSubscriptionRequests,
   subscribeToWorkspace,
   testFirestoreConnection,
 } from '../lib/firebase';
 
 import { getRateForCurrency } from '../utils/currency';
 import { DEFAULT_CURRENCY_RATES_PKR } from '../utils/worldCurrencies';
+import {
+  loadCategoriesFromLocalDb,
+  loadItemUnitsFromLocalDb,
+  loadPaymentRequestsFromLocalDb,
+  loadSubscriptionFromLocalDb,
+  saveCategoriesToLocalDb,
+  saveItemUnitsToLocalDb,
+  savePaymentRequestsToLocalDb,
+  saveSubscriptionToLocalDb,
+} from '../utils/localDb';
 
 const STORAGE_KEY = 'aqsa_bms_na_gems_v1';
 const THEME_KEY = 'aqsa_bms_theme_v1';
+const LANG_KEY = 'aqsa_bms_lang_v1';
 const AUTO_SYNC_KEY = 'aqsa_bms_auto_sync_v1';
 
 interface StoredBusinessState {
   profile: CompanyProfile;
   inventory: InventoryItem[];
+  customCategories: CategoryDefinition[];
+  customUnits: string[];
+  subscription: SubscriptionState;
+  paymentRequests: PaymentVerificationRequest[];
   purchases: PurchaseRecord[];
   sales: SalesOrder[];
   returns: ReturnRecord[];
@@ -77,6 +105,31 @@ function normalizeProfile(rawProfile?: Partial<CompanyProfile>): CompanyProfile 
     defaultCurrency: rawProfile?.defaultCurrency || INITIAL_PROFILE.defaultCurrency,
     currencyRates: mergedRates,
   };
+}
+
+function normalizeSubscriptionState(rawSub?: Partial<SubscriptionState>): SubscriptionState {
+  const base: SubscriptionState = {
+    ...INITIAL_SUBSCRIPTION,
+    ...(rawSub || {}),
+  };
+  if (base.status === 'active' && base.expiryDate) {
+    const expMs = new Date(`${base.expiryDate}T23:59:59`).getTime();
+    if (!Number.isNaN(expMs) && expMs < Date.now()) {
+      return { ...base, status: 'expired' };
+    }
+  }
+  return base;
+}
+
+function addDaysIso(baseDateStr: string, days: number): string {
+  const d = new Date(`${baseDateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    const fallback = new Date();
+    fallback.setDate(fallback.getDate() + days);
+    return fallback.toISOString().slice(0, 10);
+  }
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
 }
 
 function loadInitialState(): StoredBusinessState {
@@ -117,6 +170,16 @@ function loadInitialState(): StoredBusinessState {
           ...(parsed.reminderSettings || {}),
         },
         staff: Array.isArray(parsed.staff) && parsed.staff.length > 0 ? parsed.staff : INITIAL_STAFF,
+        customCategories:
+          Array.isArray(parsed.customCategories) && parsed.customCategories.length > 0
+            ? parsed.customCategories
+            : INITIAL_CATEGORIES,
+        customUnits:
+          Array.isArray(parsed.customUnits) && parsed.customUnits.length > 0
+            ? parsed.customUnits
+            : INITIAL_ITEM_UNITS,
+        subscription: normalizeSubscriptionState(parsed.subscription),
+        paymentRequests: Array.isArray(parsed.paymentRequests) ? parsed.paymentRequests : [],
         parties: Array.isArray(parsed.parties) ? parsed.parties : INITIAL_PARTIES,
         activeStaffId: parsed.activeStaffId || INITIAL_STAFF[0].id,
       };
@@ -128,6 +191,10 @@ function loadInitialState(): StoredBusinessState {
   return {
     profile: INITIAL_PROFILE,
     inventory: INITIAL_INVENTORY,
+    customCategories: INITIAL_CATEGORIES,
+    customUnits: INITIAL_ITEM_UNITS,
+    subscription: INITIAL_SUBSCRIPTION,
+    paymentRequests: [],
     purchases: INITIAL_PURCHASES,
     sales: INITIAL_SALES,
     returns: INITIAL_RETURNS,
@@ -154,6 +221,8 @@ interface BusinessContextValue extends StoredBusinessState {
   switchOperator: (staffId: string) => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
+  uiLanguage: UiLanguage;
+  toggleUiLanguage: () => void;
   toasts: ToastMessage[];
   notify: (text: string, tone?: 'success' | 'error' | 'info') => void;
   // Scanner quick cart handoff
@@ -165,6 +234,34 @@ interface BusinessContextValue extends StoredBusinessState {
   openSaleForEdit: (id: string) => void;
   // Mutations
   updateProfile: (next: Partial<CompanyProfile>) => void;
+  addCategory: (name: string, nameUr?: string, subCategories?: string[]) => CategoryDefinition;
+  updateCategory: (
+    id: string,
+    patch: { name?: string; nameUr?: string; subCategories?: string[] }
+  ) => void;
+  deleteCategory: (id: string) => void;
+  addSubCategory: (categoryId: string, subName: string) => void;
+  renameSubCategory: (categoryId: string, oldName: string, newName: string) => void;
+  deleteSubCategory: (categoryId: string, subName: string) => void;
+  addItemUnit: (unitName: string) => void;
+  renameItemUnit: (oldName: string, newName: string) => void;
+  deleteItemUnit: (unitName: string) => void;
+  // Subscription & Payment Verification
+  isAdminAccount: boolean;
+  isProUnlocked: boolean;
+  previewFreeMode: boolean;
+  setPreviewFreeMode: (val: boolean) => void;
+  daysUntilExpiry: number | null;
+  isExpiringSoon: boolean;
+  isFeatureLocked: (feature: SubscriptionFeatureKey) => boolean;
+  submitSubscriptionPayment: (payload: {
+    planType: 'monthly' | 'yearly';
+    paymentMethod: 'EasyPaisa' | 'Meezan Bank IBFT / Raast';
+    transactionId: string;
+    senderAccount: string;
+  }) => Promise<void>;
+  adminApprovePaymentRequest: (requestId: string, adminNote?: string) => Promise<void>;
+  adminRejectPaymentRequest: (requestId: string, adminNote?: string) => Promise<void>;
   addInventoryItem: (item: Omit<InventoryItem, 'id' | 'createdAt' | 'updatedAt'>) => InventoryItem;
   updateInventoryItem: (id: string, patch: Partial<InventoryItem>) => void;
   deleteInventoryItem: (id: string) => void;
@@ -220,6 +317,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const saved = localStorage.getItem(THEME_KEY);
     return saved === 'dark' ? 'dark' : 'light';
   });
+  const [uiLanguage, setUiLanguage] = useState<UiLanguage>(() => {
+    const saved = localStorage.getItem(LANG_KEY);
+    return saved === 'ur_en' ? 'ur_en' : 'en';
+  });
 
   // Firebase Auth & Real-Time Auto-Sync state
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -233,6 +334,8 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [liveSyncActive, setLiveSyncActive] = useState(false);
   const [pendingOfflineSync, setPendingOfflineSync] = useState(false);
   const [localMutationSeq, setLocalMutationSeq] = useState(0);
+  const [previewFreeMode, setPreviewFreeMode] = useState(false);
+  const expiryToastShownRef = useRef(false);
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -268,14 +371,38 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }, 4000);
   }, []);
 
-  // Persist to localStorage whenever state changes
+  // Persist to localStorage + IndexedDB local database whenever state changes
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
       console.error('LocalStorage save failed:', err);
     }
+    void saveCategoriesToLocalDb(state.customCategories);
+    void saveItemUnitsToLocalDb(state.customUnits);
+    void saveSubscriptionToLocalDb(state.subscription);
+    void savePaymentRequestsToLocalDb(state.paymentRequests);
   }, [state]);
+
+  // Hydrate categories, units, subscription & requests from IndexedDB on mount
+  useEffect(() => {
+    const hasStorage = Boolean(localStorage.getItem(STORAGE_KEY));
+    void Promise.all([
+      loadCategoriesFromLocalDb(),
+      loadItemUnitsFromLocalDb(),
+      loadSubscriptionFromLocalDb(),
+      loadPaymentRequestsFromLocalDb(),
+    ]).then(([cats, units, sub, reqs]) => {
+      if (hasStorage) return;
+      setState((prev) => ({
+        ...prev,
+        customCategories: cats && cats.length > 0 ? cats : prev.customCategories,
+        customUnits: units && units.length > 0 ? units : prev.customUnits,
+        subscription: sub ? normalizeSubscriptionState(sub) : prev.subscription,
+        paymentRequests: reqs && reqs.length > 0 ? reqs : prev.paymentRequests,
+      }));
+    });
+  }, []);
 
   // Apply dark mode class on <html>
   useEffect(() => {
@@ -284,6 +411,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     else root.classList.remove('dark');
     localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem(LANG_KEY, uiLanguage);
+  }, [uiLanguage]);
 
   // Firebase boot & auth listener
   useEffect(() => {
@@ -321,7 +452,46 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const unsub = subscribeToWorkspace(firebaseUser.uid, {
       knownState: emptyKnown,
       onProfile: (profile) => {
-        setState((prev) => ({ ...prev, profile: { ...prev.profile, ...profile } }));
+        let parsedCloudCats: CategoryDefinition[] | null = null;
+        if (profile.customCategoriesJson) {
+          try {
+            const arr = JSON.parse(profile.customCategoriesJson);
+            if (Array.isArray(arr) && arr.length > 0) {
+              parsedCloudCats = arr;
+            }
+          } catch {
+            // Keep existing local categories
+          }
+        }
+        let parsedCloudUnits: string[] | null = null;
+        if (profile.customUnitsJson) {
+          try {
+            const arr = JSON.parse(profile.customUnitsJson);
+            if (Array.isArray(arr) && arr.length > 0) {
+              parsedCloudUnits = arr.map((u) => String(u).trim()).filter(Boolean);
+            }
+          } catch {
+            // Keep existing local units
+          }
+        }
+        let parsedCloudSub: SubscriptionState | null = null;
+        if (profile.subscriptionJson) {
+          try {
+            const obj = JSON.parse(profile.subscriptionJson) as Partial<SubscriptionState>;
+            if (obj && typeof obj === 'object' && obj.status) {
+              parsedCloudSub = normalizeSubscriptionState(obj);
+            }
+          } catch {
+            // Keep existing local subscription
+          }
+        }
+        setState((prev) => ({
+          ...prev,
+          profile: { ...prev.profile, ...profile },
+          customCategories: parsedCloudCats ?? prev.customCategories,
+          customUnits: parsedCloudUnits ?? prev.customUnits,
+          subscription: parsedCloudSub ?? prev.subscription,
+        }));
         setLastSyncedAt(new Date().toLocaleTimeString());
       },
       onInventory: (inventory) => {
@@ -398,8 +568,62 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       },
     });
 
+    const isCloudAdmin = firebaseUser.email?.toLowerCase() === ADMIN_EMAIL;
+    const unsubReqs = subscribeToSubscriptionRequests(
+      firebaseUser.uid,
+      isCloudAdmin,
+      (cloudReqs) => {
+        setState((prev) => {
+          const mergedMap = new Map<string, PaymentVerificationRequest>();
+          for (const r of prev.paymentRequests) mergedMap.set(r.id, r);
+          for (const r of cloudReqs) mergedMap.set(r.id, r);
+          const mergedList = Array.from(mergedMap.values()).sort((a, b) =>
+            (b.submittedDate || b.createdAt).localeCompare(a.submittedDate || a.createdAt)
+          );
+
+          const ownVerified = cloudReqs.find(
+            (r) => r.ownerId === firebaseUser.uid && r.status === 'verified' && r.expiryDate
+          );
+          let nextSub = prev.subscription;
+          let nextProfile = prev.profile;
+          if (ownVerified && ownVerified.expiryDate) {
+            const expMs = new Date(`${ownVerified.expiryDate}T23:59:59`).getTime();
+            const isStillValid = !Number.isNaN(expMs) && expMs >= Date.now();
+            const activated: SubscriptionState = {
+              plan: ownVerified.planType,
+              status: isStillValid ? 'active' : 'expired',
+              startDate: ownVerified.startDate,
+              expiryDate: ownVerified.expiryDate,
+              lastPaymentMethod: ownVerified.paymentMethod,
+              lastTransactionId: ownVerified.transactionId,
+              updatedAt: new Date().toISOString(),
+            };
+            if (
+              prev.subscription.status !== activated.status ||
+              prev.subscription.expiryDate !== activated.expiryDate ||
+              prev.subscription.lastTransactionId !== activated.lastTransactionId
+            ) {
+              nextSub = activated;
+              nextProfile = {
+                ...prev.profile,
+                subscriptionJson: JSON.stringify(activated).slice(0, 3800),
+              };
+            }
+          }
+
+          return {
+            ...prev,
+            paymentRequests: mergedList,
+            subscription: nextSub,
+            profile: nextProfile,
+          };
+        });
+      }
+    );
+
     return () => {
       unsub();
+      unsubReqs();
       setLiveSyncActive(false);
       cloudSettledRef.current = false;
     };
@@ -485,6 +709,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
   }, []);
 
+  const toggleUiLanguage = useCallback(() => {
+    setUiLanguage((l) => (l === 'en' ? 'ur_en' : 'en'));
+  }, []);
+
   const activeOperator =
     state.staff.find((s) => s.id === state.activeStaffId) || state.staff[0] || INITIAL_STAFF[0];
 
@@ -519,6 +747,427 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       notify('Business profile & exchange rates saved.');
     },
     [markLocalMutation, notify]
+  );
+
+  const commitCategories = useCallback(
+    (updater: (cats: CategoryDefinition[]) => CategoryDefinition[], message: string) => {
+      setState((prev) => {
+        const nextCats = updater(prev.customCategories);
+        return {
+          ...prev,
+          customCategories: nextCats,
+          profile: {
+            ...prev.profile,
+            customCategoriesJson: JSON.stringify(nextCats).slice(0, 15500),
+          },
+        };
+      });
+      markLocalMutation();
+      notify(message);
+    },
+    [markLocalMutation, notify]
+  );
+
+  const addCategory = useCallback(
+    (name: string, nameUr?: string, subCategories: string[] = []): CategoryDefinition => {
+      const now = new Date().toISOString();
+      const created: CategoryDefinition = {
+        id: `cat-${Date.now()}`,
+        name: name.trim(),
+        nameUr: nameUr?.trim() || undefined,
+        subCategories: Array.from(new Set(subCategories.map((s) => s.trim()).filter(Boolean))),
+        createdAt: now,
+        updatedAt: now,
+      };
+      commitCategories((cats) => [...cats, created], `Category "${created.name}" saved.`);
+      return created;
+    },
+    [commitCategories]
+  );
+
+  const updateCategory = useCallback(
+    (id: string, patch: { name?: string; nameUr?: string; subCategories?: string[] }) => {
+      commitCategories(
+        (cats) =>
+          cats.map((c) =>
+            c.id === id
+              ? {
+                  ...c,
+                  name: patch.name !== undefined ? patch.name.trim() : c.name,
+                  nameUr: patch.nameUr !== undefined ? patch.nameUr.trim() || undefined : c.nameUr,
+                  subCategories:
+                    patch.subCategories !== undefined
+                      ? Array.from(new Set(patch.subCategories.map((s) => s.trim()).filter(Boolean)))
+                      : c.subCategories,
+                  updatedAt: new Date().toISOString(),
+                }
+              : c
+          ),
+        'Category updated.'
+      );
+    },
+    [commitCategories]
+  );
+
+  const deleteCategory = useCallback(
+    (id: string) => {
+      commitCategories((cats) => cats.filter((c) => c.id !== id), 'Category deleted.');
+    },
+    [commitCategories]
+  );
+
+  const addSubCategory = useCallback(
+    (categoryId: string, subName: string) => {
+      const clean = subName.trim();
+      if (!clean) return;
+      commitCategories(
+        (cats) =>
+          cats.map((c) =>
+            c.id === categoryId
+              ? {
+                  ...c,
+                  subCategories: Array.from(new Set([...c.subCategories, clean])),
+                  updatedAt: new Date().toISOString(),
+                }
+              : c
+          ),
+        `Sub-Category "${clean}" added.`
+      );
+    },
+    [commitCategories]
+  );
+
+  const renameSubCategory = useCallback(
+    (categoryId: string, oldName: string, newName: string) => {
+      const clean = newName.trim();
+      if (!clean) return;
+      commitCategories(
+        (cats) =>
+          cats.map((c) =>
+            c.id === categoryId
+              ? {
+                  ...c,
+                  subCategories: Array.from(
+                    new Set(c.subCategories.map((s) => (s === oldName ? clean : s)))
+                  ),
+                  updatedAt: new Date().toISOString(),
+                }
+              : c
+          ),
+        `Sub-Category updated to "${clean}".`
+      );
+    },
+    [commitCategories]
+  );
+
+  const deleteSubCategory = useCallback(
+    (categoryId: string, subName: string) => {
+      commitCategories(
+        (cats) =>
+          cats.map((c) =>
+            c.id === categoryId
+              ? {
+                  ...c,
+                  subCategories: c.subCategories.filter((s) => s !== subName),
+                  updatedAt: new Date().toISOString(),
+                }
+              : c
+          ),
+        `Sub-Category "${subName}" removed.`
+      );
+    },
+    [commitCategories]
+  );
+
+  const commitItemUnits = useCallback(
+    (updater: (units: string[]) => string[], message: string) => {
+      setState((prev) => {
+        const nextUnits = Array.from(new Set(updater(prev.customUnits).map((u) => u.trim()).filter(Boolean)));
+        return {
+          ...prev,
+          customUnits: nextUnits,
+          profile: {
+            ...prev.profile,
+            customUnitsJson: JSON.stringify(nextUnits).slice(0, 3800),
+          },
+        };
+      });
+      markLocalMutation();
+      notify(message);
+    },
+    [markLocalMutation, notify]
+  );
+
+  const addItemUnit = useCallback(
+    (unitName: string) => {
+      const clean = unitName.trim();
+      if (!clean) return;
+      commitItemUnits((units) => [...units, clean], `Item Unit "${clean}" saved.`);
+    },
+    [commitItemUnits]
+  );
+
+  const renameItemUnit = useCallback(
+    (oldName: string, newName: string) => {
+      const clean = newName.trim();
+      if (!clean) return;
+      setState((prev) => {
+        const nextUnits = Array.from(
+          new Set(prev.customUnits.map((u) => (u === oldName ? clean : u)).filter(Boolean))
+        );
+        return {
+          ...prev,
+          customUnits: nextUnits,
+          inventory: prev.inventory.map((item) =>
+            item.itemUnit === oldName ? { ...item, itemUnit: clean } : item
+          ),
+          profile: {
+            ...prev.profile,
+            customUnitsJson: JSON.stringify(nextUnits).slice(0, 3800),
+          },
+        };
+      });
+      markLocalMutation();
+      notify(`Item Unit renamed to "${clean}".`);
+    },
+    [markLocalMutation, notify]
+  );
+
+  const deleteItemUnit = useCallback(
+    (unitName: string) => {
+      commitItemUnits(
+        (units) => (units.length > 1 ? units.filter((u) => u !== unitName) : units),
+        `Item Unit "${unitName}" removed.`
+      );
+    },
+    [commitItemUnits]
+  );
+
+  const isAdminAccount =
+    activeOperator.role === 'admin' ||
+    firebaseUser?.email?.toLowerCase() === ADMIN_EMAIL;
+
+  const daysUntilExpiry: number | null = React.useMemo(() => {
+    if (!state.subscription.expiryDate) return null;
+    const expMs = new Date(`${state.subscription.expiryDate}T23:59:59`).getTime();
+    if (Number.isNaN(expMs)) return null;
+    return Math.ceil((expMs - Date.now()) / (1000 * 60 * 60 * 24));
+  }, [state.subscription.expiryDate]);
+
+  const isExpiringSoon =
+    state.subscription.status === 'expired' ||
+    (state.subscription.status === 'active' && daysUntilExpiry !== null && daysUntilExpiry <= 7);
+
+  const isProUnlocked =
+    !previewFreeMode &&
+    state.subscription.status === 'active' &&
+    (daysUntilExpiry === null || daysUntilExpiry >= 0);
+
+  const isFeatureLocked = useCallback(
+    (_feature: SubscriptionFeatureKey) => !isProUnlocked,
+    [isProUnlocked]
+  );
+
+  useEffect(() => {
+    if (expiryToastShownRef.current) return;
+    if (state.subscription.status === 'expired') {
+      expiryToastShownRef.current = true;
+      notify(
+        'Your AQSA BMS subscription has expired. Renew Monthly (4500 PKR) or Yearly (35000 PKR) in Subscription & Pay.',
+        'error'
+      );
+    } else if (
+      state.subscription.status === 'active' &&
+      daysUntilExpiry !== null &&
+      daysUntilExpiry <= 7
+    ) {
+      expiryToastShownRef.current = true;
+      notify(
+        `Subscription expiry reminder: ${daysUntilExpiry} day(s) remaining (Expires ${state.subscription.expiryDate}).`,
+        'info'
+      );
+    }
+  }, [state.subscription.status, state.subscription.expiryDate, daysUntilExpiry, notify]);
+
+  const submitSubscriptionPayment = useCallback(
+    async (payload: {
+      planType: 'monthly' | 'yearly';
+      paymentMethod: 'EasyPaisa' | 'Meezan Bank IBFT / Raast';
+      transactionId: string;
+      senderAccount: string;
+    }) => {
+      const cleanTid = payload.transactionId.trim();
+      if (!cleanTid) {
+        notify('Please enter your EasyPaisa or Bank Transaction ID (TID).', 'error');
+        return;
+      }
+      const planMeta = SUBSCRIPTION_PLANS[payload.planType];
+      const today = new Date().toISOString().slice(0, 10);
+      const now = new Date().toISOString();
+      const ownerUid = firebaseUser?.uid || stateRef.current.activeStaffId;
+      const newReq: PaymentVerificationRequest = {
+        id: `payreq-${Date.now()}`,
+        ownerId: ownerUid,
+        userEmail: firebaseUser?.email || activeOperator.email || '',
+        userName: firebaseUser?.displayName || activeOperator.name,
+        companyName: stateRef.current.profile.companyName,
+        planType: payload.planType,
+        amountPkr: planMeta.pricePkr,
+        paymentMethod: payload.paymentMethod,
+        transactionId: cleanTid,
+        senderAccount: payload.senderAccount.trim(),
+        status: 'pending',
+        submittedDate: today,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const nextSub: SubscriptionState = {
+        ...stateRef.current.subscription,
+        plan: payload.planType,
+        status: 'pending_verification',
+        lastPaymentMethod: payload.paymentMethod,
+        lastTransactionId: cleanTid,
+        updatedAt: now,
+      };
+
+      setState((prev) => ({
+        ...prev,
+        paymentRequests: [newReq, ...prev.paymentRequests],
+        subscription: nextSub,
+        profile: {
+          ...prev.profile,
+          subscriptionJson: JSON.stringify(nextSub).slice(0, 3800),
+        },
+      }));
+      markLocalMutation();
+
+      if (firebaseUser) {
+        try {
+          await submitSubscriptionRequestToCloud(newReq);
+        } catch {
+          // Local copy already saved
+        }
+      }
+      notify(`Transaction ID ${cleanTid} submitted for Admin verification.`, 'info');
+    },
+    [firebaseUser, activeOperator, markLocalMutation, notify]
+  );
+
+  const adminApprovePaymentRequest = useCallback(
+    async (requestId: string, adminNote?: string) => {
+      const target = stateRef.current.paymentRequests.find((r) => r.id === requestId);
+      if (!target) return;
+      const startDate = new Date().toISOString().slice(0, 10);
+      const durationDays = SUBSCRIPTION_PLANS[target.planType].durationDays;
+      const expiryDate = addDaysIso(startDate, durationDays);
+      const now = new Date().toISOString();
+      const note = adminNote?.trim() || 'Verified & Full Version Activated';
+
+      setState((prev) => {
+        const nextReqs = prev.paymentRequests.map((r) =>
+          r.id === requestId
+            ? {
+                ...r,
+                status: 'verified' as const,
+                startDate,
+                expiryDate,
+                adminNote: note,
+                updatedAt: now,
+              }
+            : r
+        );
+        const matchesLocalOwner =
+          !firebaseUser ||
+          target.ownerId === firebaseUser.uid ||
+          target.ownerId === prev.activeStaffId;
+
+        const nextSub: SubscriptionState = matchesLocalOwner
+          ? {
+              plan: target.planType,
+              status: 'active',
+              startDate,
+              expiryDate,
+              lastPaymentMethod: target.paymentMethod,
+              lastTransactionId: target.transactionId,
+              updatedAt: now,
+            }
+          : prev.subscription;
+
+        return {
+          ...prev,
+          paymentRequests: nextReqs,
+          subscription: nextSub,
+          profile: matchesLocalOwner
+            ? { ...prev.profile, subscriptionJson: JSON.stringify(nextSub).slice(0, 3800) }
+            : prev.profile,
+        };
+      });
+      setPreviewFreeMode(false);
+      markLocalMutation();
+
+      if (firebaseUser && firebaseUser.email?.toLowerCase() === ADMIN_EMAIL) {
+        try {
+          await adminUpdateSubscriptionRequestStatus(requestId, {
+            status: 'verified',
+            startDate,
+            expiryDate,
+            adminNote: note,
+          });
+        } catch {
+          // Local verification saved
+        }
+      }
+      notify(`Payment ${target.transactionId} verified! Full Pro unlocked until ${expiryDate}.`);
+    },
+    [firebaseUser, markLocalMutation, notify]
+  );
+
+  const adminRejectPaymentRequest = useCallback(
+    async (requestId: string, adminNote?: string) => {
+      const target = stateRef.current.paymentRequests.find((r) => r.id === requestId);
+      if (!target) return;
+      const now = new Date().toISOString();
+      const note = adminNote?.trim() || 'Transaction ID could not be matched';
+
+      setState((prev) => {
+        const nextReqs = prev.paymentRequests.map((r) =>
+          r.id === requestId
+            ? { ...r, status: 'rejected' as const, adminNote: note, updatedAt: now }
+            : r
+        );
+        const matchesLocalOwner =
+          !firebaseUser ||
+          target.ownerId === firebaseUser.uid ||
+          target.ownerId === prev.activeStaffId;
+        const nextSub: SubscriptionState =
+          matchesLocalOwner && prev.subscription.lastTransactionId === target.transactionId
+            ? { ...prev.subscription, status: 'rejected', updatedAt: now }
+            : prev.subscription;
+        return {
+          ...prev,
+          paymentRequests: nextReqs,
+          subscription: nextSub,
+          profile: matchesLocalOwner
+            ? { ...prev.profile, subscriptionJson: JSON.stringify(nextSub).slice(0, 3800) }
+            : prev.profile,
+        };
+      });
+      markLocalMutation();
+
+      if (firebaseUser && firebaseUser.email?.toLowerCase() === ADMIN_EMAIL) {
+        try {
+          await adminUpdateSubscriptionRequestStatus(requestId, {
+            status: 'rejected',
+            adminNote: note,
+          });
+        } catch {
+          // Local rejection saved
+        }
+      }
+      notify(`Payment ${target.transactionId} marked rejected.`, 'info');
+    },
+    [firebaseUser, markLocalMutation, notify]
   );
 
   const addInventoryItem = useCallback(
@@ -1273,6 +1922,10 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setState({
       profile: INITIAL_PROFILE,
       inventory: INITIAL_INVENTORY,
+      customCategories: INITIAL_CATEGORIES,
+      customUnits: INITIAL_ITEM_UNITS,
+      subscription: INITIAL_SUBSCRIPTION,
+      paymentRequests: [],
       purchases: INITIAL_PURCHASES,
       sales: INITIAL_SALES,
       returns: INITIAL_RETURNS,
@@ -1344,9 +1997,45 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!data) {
         notify('No cloud backup found for this account yet.', 'info');
       } else {
+        let parsedCloudCats: CategoryDefinition[] | null = null;
+        if (data.profile?.customCategoriesJson) {
+          try {
+            const arr = JSON.parse(data.profile.customCategoriesJson);
+            if (Array.isArray(arr) && arr.length > 0) {
+              parsedCloudCats = arr;
+            }
+          } catch {
+            // Keep existing local categories
+          }
+        }
+        let parsedCloudUnits: string[] | null = null;
+        if (data.profile?.customUnitsJson) {
+          try {
+            const arr = JSON.parse(data.profile.customUnitsJson);
+            if (Array.isArray(arr) && arr.length > 0) {
+              parsedCloudUnits = arr.map((u) => String(u).trim()).filter(Boolean);
+            }
+          } catch {
+            // Keep existing local units
+          }
+        }
+        let parsedCloudSub: SubscriptionState | null = null;
+        if (data.profile?.subscriptionJson) {
+          try {
+            const obj = JSON.parse(data.profile.subscriptionJson) as Partial<SubscriptionState>;
+            if (obj && typeof obj === 'object' && obj.status) {
+              parsedCloudSub = normalizeSubscriptionState(obj);
+            }
+          } catch {
+            // Keep existing local subscription
+          }
+        }
         setState((prev) => ({
           ...prev,
           profile: data.profile ? { ...prev.profile, ...data.profile } : prev.profile,
+          customCategories: parsedCloudCats ?? prev.customCategories,
+          customUnits: parsedCloudUnits ?? prev.customUnits,
+          subscription: parsedCloudSub ?? prev.subscription,
           inventory: data.inventory && data.inventory.length > 0 ? data.inventory : prev.inventory,
           purchases: data.purchases && data.purchases.length > 0 ? data.purchases : prev.purchases,
           sales: data.sales && data.sales.length > 0 ? data.sales : prev.sales,
@@ -1377,6 +2066,8 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         switchOperator,
         theme,
         toggleTheme,
+        uiLanguage,
+        toggleUiLanguage,
         toasts,
         notify,
         posQueuedSku,
@@ -1385,6 +2076,25 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setQueuedEditSaleId,
         openSaleForEdit,
         updateProfile,
+        addCategory,
+        updateCategory,
+        deleteCategory,
+        addSubCategory,
+        renameSubCategory,
+        deleteSubCategory,
+        addItemUnit,
+        renameItemUnit,
+        deleteItemUnit,
+        isAdminAccount,
+        isProUnlocked,
+        previewFreeMode,
+        setPreviewFreeMode,
+        daysUntilExpiry,
+        isExpiringSoon,
+        isFeatureLocked,
+        submitSubscriptionPayment,
+        adminApprovePaymentRequest,
+        adminRejectPaymentRequest,
         addInventoryItem,
         updateInventoryItem,
         deleteInventoryItem,

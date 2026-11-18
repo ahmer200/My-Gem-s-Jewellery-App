@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F8FAFC"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/title_subscription_screen"
+            android:textColor="#0F172A"
+            android:textSize="19sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvSubscriptionStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Plan: Free / Basic Version (Upgrade to unlock all Pro modules)"
+            android:textColor="#065F46"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+
+        <!-- In-App Expiry Reminder Banner -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardExpiryReminder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:visibility="gone"
+            app:cardBackgroundColor="#FEF3C7"
+            app:cardCornerRadius="10dp"
+            app:strokeColor="#D97706"
+            app:strokeWidth="1dp">
+
+            <TextView
+                android:id="@+id/tvExpiryReminder"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:text="Subscription expiring soon — renew via EasyPaisa (03320001602) or Meezan Bank."
+                android:textColor="#78350F"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Free vs Paid Features Comparison Card -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardCornerRadius="12dp"
+            app:strokeColor="#CBD5E1"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Free / Basic vs Paid Full Version"
+                    android:textColor="#0F172A"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="FREE / BASIC INCLUDED:\n• Edit Company Name\n• Limited Stock Report Preview &amp; Dashboard View"
+                    android:textColor="#065F46"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="UNLOCKS WITH PAID PLAN (LOCKED IN FREE):\n• Stock Image Capture (Camera + Gallery)\n• Complete Daily Stock Movement Report (Page Totals + Grand Total)\n• Complete Daily Amount Wise Stock Report (Cost Only)\n• Full Category, Sub-Category &amp; Item Unit Add/Edit/Delete\n• Complete Sales Invoicing, Dispatch &amp; A4 PDF Printing"
+                    android:textColor="#9A3412"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Plan Pricing Cards -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Select Subscription Plan"
+            android:textColor="#0F172A"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/rgSubscriptionPlan"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rbMonthlyPlan"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:checked="true"
+                android:text="Monthly Plan — 4500 PKR / Month (30 Days Full Unlock)"
+                android:textStyle="bold" />
+
+            <RadioButton
+                android:id="@+id/rbYearlyPlan"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Yearly Plan — 35000 PKR / Year (365 Days Full Unlock — Save 19,000 PKR)"
+                android:textStyle="bold" />
+        </RadioGroup>
+
+        <!-- Official EasyPaisa & Meezan Bank Payment Details -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="#ECFDF5"
+            app:cardCornerRadius="12dp"
+            app:strokeColor="#059669"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="14dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Official Payment Details / ادائیگی کی تفصیلات"
+                    android:textColor="#064E3B"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:fontFamily="monospace"
+                    android:text="@string/easypaisa_payment_details"
+                    android:textColor="#0F172A"
+                    android:textIsSelectable="true"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:fontFamily="monospace"
+                    android:text="@string/meezan_bank_payment_details"
+                    android:textColor="#0F172A"
+                    android:textIsSelectable="true"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Transaction Verification Submission Form -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Submit Payment Transaction ID (TID) for Verification"
+            android:textColor="#0F172A"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/spPaymentMethod"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="6dp" />
+
+        <EditText
+            android:id="@+id/etTransactionId"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Transaction ID / TID / Raast Ref (e.g. 8845123490)"
+            android:inputType="text" />
+
+        <EditText
+            android:id="@+id/etSenderAccount"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Your Sender Mobile / Bank Account Title"
+            android:inputType="text" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnSubmitPaymentProof"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="#047857"
+            android:text="@string/btn_submit_payment_tid"
+            android:textColor="#FFFFFF" />
+
+    </LinearLayout>
+</ScrollView>

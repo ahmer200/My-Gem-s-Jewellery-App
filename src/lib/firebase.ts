@@ -19,9 +19,13 @@ import {
   onSnapshot,
   persistentLocalCache,
   persistentMultipleTabManager,
+  query,
   QueryDocumentSnapshot,
   serverTimestamp,
+  setDoc,
   Unsubscribe,
+  updateDoc,
+  where,
   writeBatch,
   Firestore,
 } from 'firebase/firestore';
@@ -31,6 +35,7 @@ import {
   InventoryItem,
   PartyAccount,
   PaymentRecord,
+  PaymentVerificationRequest,
   PurchaseRecord,
   ReminderLog,
   ReturnRecord,
@@ -204,6 +209,9 @@ function mapProfileData(p: DocumentData): CompanyProfile {
     ntn: p.ntn || '',
     defaultCurrency: p.defaultCurrency || 'CNY',
     currencyRates: parsedRates,
+    customCategoriesJson: typeof p.customCategoriesJson === 'string' ? p.customCategoriesJson : undefined,
+    customUnitsJson: typeof p.customUnitsJson === 'string' ? p.customUnitsJson : undefined,
+    subscriptionJson: typeof p.subscriptionJson === 'string' ? p.subscriptionJson : undefined,
     rmbToPkr: typeof p.rmbToPkr === 'number' ? p.rmbToPkr : parsedRates.CNY ?? 0,
     usdToPkr: typeof p.usdToPkr === 'number' ? p.usdToPkr : parsedRates.USD ?? 0,
     defaultMarkupPercent: Number(p.defaultMarkupPercent) || 0,
@@ -546,6 +554,9 @@ export async function pushWorkspaceToCloud(
     ntn: (payload.profile.ntn || '').slice(0, 64),
     defaultCurrency: (payload.profile.defaultCurrency || 'CNY').toUpperCase().slice(0, 6),
     currencyRatesJson: JSON.stringify(ratesMap).slice(0, 8000),
+    customCategoriesJson: (payload.profile.customCategoriesJson || '[]').slice(0, 16000),
+    customUnitsJson: (payload.profile.customUnitsJson || '[]').slice(0, 4000),
+    subscriptionJson: (payload.profile.subscriptionJson || '{}').slice(0, 4000),
     rmbToPkr: cnyRate,
     usdToPkr: usdRate,
     defaultMarkupPercent: Math.min(1000, Math.max(0, Number(payload.profile.defaultMarkupPercent) || 0)),
@@ -1206,4 +1217,109 @@ export function subscribeToWorkspace(
   return () => {
     unsubs.forEach((unsub) => unsub());
   };
+}
+
+function mapSubscriptionRequestDoc(
+  d: QueryDocumentSnapshot<DocumentData>
+): PaymentVerificationRequest {
+  const data = d.data();
+  return {
+    id: d.id,
+    ownerId: data.ownerId || '',
+    userEmail: data.userEmail || '',
+    userName: data.userName || '',
+    companyName: data.companyName || '',
+    planType: data.planType === 'yearly' ? 'yearly' : 'monthly',
+    amountPkr: Number(data.amountPkr) || 4500,
+    paymentMethod:
+      data.paymentMethod === 'Meezan Bank IBFT / Raast'
+        ? 'Meezan Bank IBFT / Raast'
+        : 'EasyPaisa',
+    transactionId: data.transactionId || '',
+    senderAccount: data.senderAccount || '',
+    status:
+      data.status === 'verified'
+        ? 'verified'
+        : data.status === 'rejected'
+          ? 'rejected'
+          : 'pending',
+    adminNote: data.adminNote || undefined,
+    submittedDate: data.submittedDate || '',
+    startDate: data.startDate || undefined,
+    expiryDate: data.expiryDate || undefined,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export async function submitSubscriptionRequestToCloud(
+  req: PaymentVerificationRequest
+): Promise<void> {
+  const id = safeDocId(req.id);
+  const path = `subscriptionRequests/${id}`;
+  try {
+    await setDoc(doc(db, path), {
+      ownerId: req.ownerId,
+      userEmail: (req.userEmail || '').slice(0, 160),
+      userName: (req.userName || '').slice(0, 120),
+      companyName: (req.companyName || '').slice(0, 160),
+      planType: req.planType,
+      amountPkr: req.planType === 'yearly' ? 35000 : 4500,
+      paymentMethod: req.paymentMethod.slice(0, 60),
+      transactionId: req.transactionId.slice(0, 120),
+      senderAccount: (req.senderAccount || '').slice(0, 120),
+      status: 'pending',
+      submittedDate: req.submittedDate.slice(0, 40),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export function subscribeToSubscriptionRequests(
+  uid: string,
+  isBootstrappedAdminUser: boolean,
+  onRequests: (requests: PaymentVerificationRequest[]) => void
+): Unsubscribe {
+  const colRef = collection(db, 'subscriptionRequests');
+  const q = isBootstrappedAdminUser ? colRef : query(colRef, where('ownerId', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      onRequests(snap.docs.map(mapSubscriptionRequestDoc));
+    },
+    (error) => {
+      try {
+        handleFirestoreError(error, OperationType.LIST, 'subscriptionRequests');
+      } catch {
+        // Logged via handleFirestoreError
+      }
+    }
+  );
+}
+
+export async function adminUpdateSubscriptionRequestStatus(
+  requestId: string,
+  patch: {
+    status: 'verified' | 'rejected';
+    adminNote?: string;
+    startDate?: string;
+    expiryDate?: string;
+  }
+): Promise<void> {
+  const id = safeDocId(requestId);
+  const path = `subscriptionRequests/${id}`;
+  try {
+    await updateDoc(doc(db, path), {
+      status: patch.status,
+      adminNote: (patch.adminNote || '').slice(0, 300),
+      startDate: (patch.startDate || '').slice(0, 40),
+      expiryDate: (patch.expiryDate || '').slice(0, 40),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
 }

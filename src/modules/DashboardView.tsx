@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
+  Crown,
   Edit3,
   FileSpreadsheet,
   Gem,
@@ -11,11 +12,13 @@ import {
   Receipt,
   Save,
   ShoppingBag,
+  Tags,
   TrendingUp,
   Truck,
   Wallet,
 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
+import { bi } from '../utils/bilingual';
 import { computeItemFinalPkr, formatMoney, getRateForCurrency } from '../utils/currency';
 import { InvoiceModal } from '../components/InvoiceModal';
 import { DeleteActionButton } from '../components/DeleteActionButton';
@@ -30,12 +33,15 @@ export const DashboardView: React.FC = () => {
     inventory,
     sales,
     purchases,
+    uiLanguage,
     updateProfile,
     dispatchSale,
     openSaleForEdit,
     deleteSale,
     setActiveModule,
     hasPermission,
+    isProUnlocked,
+    subscription,
   } = useBusiness();
 
   const [selectedCurrency, setSelectedCurrency] = useState<string>(profile.defaultCurrency || 'CNY');
@@ -119,6 +125,16 @@ export const DashboardView: React.FC = () => {
               <p className="text-xs md:text-sm text-slate-600 dark:text-slate-400">
                 {profile.subtitle} · {inventory.length} SKUs ({totalPieces} pcs in stock)
               </p>
+              <button
+                type="button"
+                onClick={() => setActiveModule('subscription')}
+                className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
+              >
+                <Crown className="w-3.5 h-3.5" />
+                {isProUnlocked
+                  ? `Full Pro Plan Active${subscription.expiryDate ? ` · Expires ${subscription.expiryDate}` : ''}`
+                  : 'Free / Basic Plan · Upgrade (4500 PKR/mo) via EasyPaisa / Meezan Bank'}
+              </button>
             </div>
           </div>
 
@@ -235,14 +251,16 @@ export const DashboardView: React.FC = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
         {[
-          { id: 'sales', label: 'New Invoice', icon: Receipt },
-          { id: 'scanner', label: 'Scan QR / Barcode', icon: QrCode },
-          { id: 'inventory', label: 'Inventory', icon: Gem },
-          { id: 'purchases', label: 'Record Purchase', icon: ShoppingBag },
-          { id: 'payments', label: 'Payments & Dues', icon: Wallet },
-          { id: 'reports', label: 'Excel / PDF Reports', icon: FileSpreadsheet },
+          { id: 'sales', label: bi('New Invoice', 'نیا انوائس', uiLanguage), icon: Receipt },
+          { id: 'scanner', label: bi('Scan QR', 'کیو آر اسکین', uiLanguage), icon: QrCode },
+          { id: 'inventory', label: bi('Inventory', 'انوینٹری', uiLanguage), icon: Gem },
+          { id: 'categories', label: bi('Categories', 'کیٹیگریز', uiLanguage), icon: Tags },
+          { id: 'purchases', label: bi('Purchase', 'خریداری', uiLanguage), icon: ShoppingBag },
+          { id: 'payments', label: bi('Payments', 'ادائیگیاں', uiLanguage), icon: Wallet },
+          { id: 'reports', label: bi('Reports / PDF', 'رپورٹس / پی ڈی ایف', uiLanguage), icon: FileSpreadsheet },
+          { id: 'subscription', label: bi('Plan & Pay', 'سبسکرپشن', uiLanguage), icon: Crown },
         ].map((action) => {
           const Icon = action.icon;
           return (

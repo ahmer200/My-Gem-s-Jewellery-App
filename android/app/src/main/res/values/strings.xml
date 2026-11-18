@@ -1,4 +1,15 @@
 <resources>
     <string name="app_name">Aqsa Business Management System</string>
     <string name="live_app_url">https://ais-pre-oz3gvlqu3ye6zgyi457vij-605316800459.asia-east1.run.app</string>
+    <string name="title_stock_entry">Stock Entry / نیا اسٹاک اندراج</string>
+    <string name="title_subscription_screen">Subscription &amp; Pro Unlock / سبسکرپشن پلان</string>
+    <string name="title_admin_verify">Admin Payment Verification Console / ایڈمن تصدیق</string>
+    <string name="btn_take_photo">Take Photo (Camera) / تصویر کھینچیں</string>
+    <string name="btn_upload_gallery">Upload Gallery / گیلری سے اپ لوڈ</string>
+    <string name="btn_submit_payment_tid">Submit Payment TID for Verification</string>
+    <string name="btn_edit">Edit / ترمیم</string>
+    <string name="btn_delete">Delete / حذف</string>
+    <string name="cd_stock_photo">Gemstone Stock Photo</string>
+    <string name="easypaisa_payment_details">EasyPaisa Number: 03320001602</string>
+    <string name="meezan_bank_payment_details">Meezan Bank Details:\nAccount Title: AHMER IQBAL\nAccount Number: 16020109874519\nIBAN: PK54MEZN0016020109874519\nBranch: LATIFABAD BRANCH-HYD</string>
 </resources>

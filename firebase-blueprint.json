@@ -27,6 +27,9 @@
         "ntn": { "type": "string", "maxLength": 64 },
         "defaultCurrency": { "type": "string", "minLength": 3, "maxLength": 6, "pattern": "^[A-Z]{3,6}$" },
         "currencyRatesJson": { "type": "string", "maxLength": 8000 },
+        "customCategoriesJson": { "type": "string", "maxLength": 16000 },
+        "customUnitsJson": { "type": "string", "maxLength": 4000 },
+        "subscriptionJson": { "type": "string", "maxLength": 4000 },
         "rmbToPkr": { "type": "number" },
         "usdToPkr": { "type": "number" },
         "defaultMarkupPercent": { "type": "number" },
@@ -242,6 +245,30 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["ownerId", "partyType", "name", "creditLimit", "creditCurrency", "createdAt", "updatedAt"]
+    },
+    "SubscriptionRequest": {
+      "title": "SubscriptionRequest",
+      "description": "Subscription payment submission (EasyPaisa / Meezan Bank IBFT) awaiting admin verification.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "userEmail": { "type": "string", "maxLength": 160 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "companyName": { "type": "string", "maxLength": 160 },
+        "planType": { "type": "string", "enum": ["monthly", "yearly"] },
+        "amountPkr": { "type": "number" },
+        "paymentMethod": { "type": "string", "maxLength": 60 },
+        "transactionId": { "type": "string", "minLength": 2, "maxLength": 120 },
+        "senderAccount": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["pending", "verified", "rejected"] },
+        "adminNote": { "type": "string", "maxLength": 300 },
+        "submittedDate": { "type": "string", "maxLength": 40 },
+        "startDate": { "type": "string", "maxLength": 40 },
+        "expiryDate": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "planType", "amountPkr", "paymentMethod", "transactionId", "status", "submittedDate", "createdAt", "updatedAt"]
     }
   },
   "firestore": {
@@ -284,6 +311,10 @@
     "/workspaces/{workspaceId}/parties/{partyId}": {
       "schema": { "$ref": "#/entities/PartyAccount" },
       "description": "Customers and vendors directory with editable address, contact number, city, and credit limit."
+    },
+    "/subscriptionRequests/{requestId}": {
+      "schema": { "$ref": "#/entities/SubscriptionRequest" },
+      "description": "Subscription payment verification queue for EasyPaisa and Meezan Bank transfers."
     }
   }
 }

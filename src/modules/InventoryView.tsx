@@ -1,21 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Crown,
   Edit3,
   FileSpreadsheet,
   FileText,
   ImagePlus,
   Layers,
+  Lock,
   PackagePlus,
   Plane,
   QrCode,
   RefreshCw,
   RotateCcw,
   Search,
+  Settings2,
   Ship,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { CurrencyCode, InventoryItem } from '../types/business';
@@ -26,6 +31,8 @@ import {
   getRateForCurrency,
 } from '../utils/currency';
 import { generateInventorySku } from '../utils/sku';
+import { bi } from '../utils/bilingual';
+import { compressImageFileToDataUrl } from '../utils/localDb';
 import {
   exportInventoryCsv,
   exportInventoryExcel,
@@ -142,8 +149,13 @@ function createEmptyForm(
 export const InventoryView: React.FC = () => {
   const {
     inventory,
+    customCategories,
+    customUnits,
     profile,
+    uiLanguage,
+    setActiveModule,
     hasPermission,
+    isFeatureLocked,
     addInventoryItem,
     updateInventoryItem,
     deleteInventoryItem,
@@ -152,6 +164,7 @@ export const InventoryView: React.FC = () => {
 
   const canEdit = hasPermission('edit_inventory');
   const canViewCost = hasPermission('view_profit');
+  const isPhotoLocked = isFeatureLocked('stock_photo_upload');
 
   const defaultCur = profile.defaultCurrency || 'CNY';
   const defaultRate = getRateForCurrency(defaultCur, profile);
@@ -185,13 +198,42 @@ export const InventoryView: React.FC = () => {
     setForm((prev) => (prev.sku === generated ? prev : { ...prev, sku: generated }));
   }, [autoSkuEnabled, form.sizeMm, form.subCategory, form.stockPieces, form.batchNumber]);
 
-  const categories = useMemo(
-    () => [
-      'All',
-      ...Array.from(new Set([...CATEGORY_OPTIONS, ...inventory.map((i) => i.category).filter(Boolean)])),
-    ],
-    [inventory]
+  const categoryNames = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...customCategories.map((c) => c.name),
+          ...CATEGORY_OPTIONS,
+          ...inventory.map((i) => i.category).filter(Boolean),
+        ])
+      ),
+    [customCategories, inventory]
   );
+
+  const categories = useMemo(() => ['All', ...categoryNames], [categoryNames]);
+
+  const unitOptions = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...customUnits,
+          ...UNIT_OPTIONS,
+          ...inventory.map((i) => i.itemUnit).filter(Boolean),
+          form.itemUnit,
+        ].filter(Boolean))
+      ),
+    [customUnits, inventory, form.itemUnit]
+  );
+
+  const activeCategorySubList = useMemo(() => {
+    const matched = customCategories.find(
+      (c) => c.name.toLowerCase() === (form.category || '').trim().toLowerCase()
+    );
+    const fromInventory = inventory
+      .filter((i) => i.category === form.category && i.subCategory)
+      .map((i) => i.subCategory);
+    return Array.from(new Set([...(matched?.subCategories || []), ...fromInventory]));
+  }, [customCategories, form.category, inventory]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -318,20 +360,28 @@ export const InventoryView: React.FC = () => {
     }, 50);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 1024 * 1024 * 2) {
-      notify('Image should be smaller than 2 MB.', 'error');
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isPhotoLocked) {
+      notify('Stock photo upload requires Full Pro subscription.', 'error');
+      e.target.value = '';
+      setActiveModule('subscription');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setForm((prev) => ({ ...prev, imageUrl: reader.result as string }));
-      }
-    };
-    reader.readAsDataURL(file);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 1024 * 1024 * 12) {
+      notify('Image should be smaller than 12 MB.', 'error');
+      return;
+    }
+    try {
+      const compressed = await compressImageFileToDataUrl(file);
+      setForm((prev) => ({ ...prev, imageUrl: compressed }));
+      notify('Photo attached and compressed for stock item.', 'success');
+    } catch {
+      notify('Unable to process selected image.', 'error');
+    } finally {
+      e.target.value = '';
+    }
   };
 
   const handleCostCurrencyChange = (nextCur: string) => {
@@ -469,7 +519,7 @@ export const InventoryView: React.FC = () => {
             <div className="flex items-center gap-2.5">
               <Layers className="w-5 h-5 text-emerald-700 dark:text-emerald-400 shrink-0" />
               <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-                Inventory
+                {bi('Inventory', 'انوینٹری / اسٹاک', uiLanguage)}
               </h2>
             </div>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -686,24 +736,45 @@ export const InventoryView: React.FC = () => {
 
               {/* 5. Sub-Category */}
               <div>
-                <label className={labelClass}>5. Sub-Category</label>
+                <label className={labelClass}>
+                  5. {bi('Sub-Category', 'ذیلی کیٹیگری', uiLanguage)}
+                </label>
                 <input
+                  list="inventory-subcategory-list"
                   value={form.subCategory}
                   onChange={(e) => setForm({ ...form, subCategory: e.target.value })}
-                  placeholder="e.g. Faceted, Cabochon"
+                  placeholder="Select or type sub-category"
                   className={inputClass}
                 />
+                <datalist id="inventory-subcategory-list">
+                  {activeCategorySubList.map((sub) => (
+                    <option key={sub} value={sub} />
+                  ))}
+                </datalist>
               </div>
 
               {/* 6. Category */}
               <div>
-                <label className={labelClass}>6. Category</label>
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 truncate">
+                    6. {bi('Category', 'کیٹیگری', uiLanguage)}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('categories')}
+                    className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline shrink-0"
+                    title="Manage custom categories & sub-categories"
+                  >
+                    <Settings2 className="w-3 h-3" />
+                    {bi('Manage', 'ترتیب', uiLanguage)}
+                  </button>
+                </div>
                 <select
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
                   className={inputClass}
                 >
-                  {Array.from(new Set([...CATEGORY_OPTIONS, form.category].filter(Boolean))).map(
+                  {Array.from(new Set([...categoryNames, form.category].filter(Boolean))).map(
                     (c) => (
                       <option key={c} value={c}>
                         {c}
@@ -728,25 +799,38 @@ export const InventoryView: React.FC = () => {
 
               {/* 8. Item Unit */}
               <div>
-                <label className={labelClass}>8. Item Unit</label>
+                <div className="flex items-center justify-between gap-1 mb-1">
+                  <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 truncate">
+                    8. {bi('Item Unit', 'آئٹم یونٹ', uiLanguage)}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setActiveModule('categories')}
+                    className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline shrink-0"
+                    title="Manage custom item units"
+                  >
+                    <Settings2 className="w-3 h-3" />
+                    {bi('Manage', 'ترتیب', uiLanguage)}
+                  </button>
+                </div>
                 <select
                   value={form.itemUnit}
                   onChange={(e) => setForm({ ...form, itemUnit: e.target.value })}
                   className={inputClass}
                 >
-                  {Array.from(new Set([...UNIT_OPTIONS, form.itemUnit].filter(Boolean))).map(
-                    (u) => (
-                      <option key={u} value={u}>
-                        {u}
-                      </option>
-                    )
-                  )}
+                  {unitOptions.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
                 </select>
               </div>
 
-              {/* 9. 1TP Weight */}
+              {/* 9. Item Weight */}
               <div>
-                <label className={labelClass}>9. 1TP Weight</label>
+                <label className={labelClass}>
+                  9. {bi('Item Weight', 'آئٹم وزن', uiLanguage)}
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -1098,25 +1182,87 @@ export const InventoryView: React.FC = () => {
                 />
               </div>
 
-              {/* Optional Photo + Submit */}
-              <div className="sm:col-span-2 xl:col-span-2 flex flex-wrap items-end justify-between gap-2">
-                <label className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer min-h-[38px]">
-                  <ImagePlus className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
-                  <span>{form.imageUrl ? 'Photo Attached' : 'Upload Photo'}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageUpload}
-                    className="hidden"
-                  />
-                </label>
+              {/* Camera Capture + Gallery Upload + Image Preview + Submit */}
+              <div className="sm:col-span-2 lg:col-span-4 xl:col-span-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  {isPhotoLocked ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        notify('Upgrade to Pro (4500 PKR/mo or 35000 PKR/yr) to capture & upload stock images.', 'info');
+                        setActiveModule('subscription');
+                      }}
+                      className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-amber-400 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-xs font-semibold text-amber-900 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 min-h-[40px]"
+                    >
+                      <Lock className="w-4 h-4 shrink-0" />
+                      <span>
+                        {bi(
+                          'Camera & Gallery Photo Upload (Pro Locked — Click to Unlock)',
+                          'کیمرہ اور گیلری تصویر (پرو ورژن میں دستیاب)',
+                          uiLanguage
+                        )}
+                      </span>
+                      <Crown className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    </button>
+                  ) : (
+                    <>
+                      {/* Direct Camera Button */}
+                      <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-emerald-600 bg-emerald-50 dark:bg-emerald-950/30 text-xs font-semibold text-emerald-800 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 cursor-pointer min-h-[40px]">
+                        <Camera className="w-4 h-4 shrink-0" />
+                        <span>{bi('Take Photo (Camera)', 'کیمرہ تصویر', uiLanguage)}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+
+                      {/* Phone Gallery Upload Button */}
+                      <label className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer min-h-[40px]">
+                        <ImagePlus className="w-4 h-4 text-sky-600 dark:text-sky-400 shrink-0" />
+                        <span>{bi('Upload Gallery', 'گیلری سے اپلوڈ', uiLanguage)}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                    </>
+                  )}
+
+                  {form.imageUrl && (
+                    <div className="inline-flex items-center gap-2 pl-2 pr-1.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950">
+                      <img
+                        src={form.imageUrl}
+                        alt="Stock preview"
+                        className="w-8 h-8 rounded object-cover border border-slate-200 dark:border-slate-700"
+                      />
+                      <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
+                        {bi('Photo Saved', 'تصویر منسلک ہے', uiLanguage)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setForm((prev) => ({ ...prev, imageUrl: '' }))}
+                        className="p-1 rounded text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        title="Remove photo"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
 
                 <button
                   type="submit"
-                  className="inline-flex items-center gap-2 px-5 py-2 rounded-lg bg-emerald-700 text-xs font-semibold text-white hover:bg-emerald-800 whitespace-nowrap shrink-0 min-h-[40px]"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2 rounded-lg bg-emerald-700 text-xs font-semibold text-white hover:bg-emerald-800 whitespace-nowrap shrink-0 min-h-[40px]"
                 >
                   <CheckCircle2 className="w-4 h-4" />
-                  {editingItemId ? 'Update Product Entry' : 'Save Product Entry'}
+                  {editingItemId
+                    ? bi('Update Product Entry', 'پراڈکٹ اپڈیٹ کریں', uiLanguage)
+                    : bi('Save Product Entry', 'نیا اسٹاک محفوظ کریں', uiLanguage)}
                 </button>
               </div>
             </div>
@@ -1199,7 +1345,7 @@ export const InventoryView: React.FC = () => {
                 <th className="px-3 py-3">6. Category</th>
                 <th className="px-3 py-3 text-right">7. Stock Pieces</th>
                 <th className="px-3 py-3">8. Item Unit</th>
-                <th className="px-3 py-3 text-right">9. 1TP Weight</th>
+                <th className="px-3 py-3 text-right">9. Item Weight</th>
                 <th className="px-3 py-3">10. Batch #</th>
                 <th className="px-3 py-3 text-right">11. Stock Quantity</th>
                 <th className="px-3 py-3 text-right">12. Cent</th>
