@@ -4,9 +4,11 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Cloud,
   Copy,
   Crown,
   Lock,
+  LogOut,
   ShieldCheck,
   Smartphone,
   Unlock,
@@ -14,13 +16,14 @@ import {
 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { bi } from '../utils/bilingual';
-import { PAYMENT_ACCOUNT_DETAILS, SUBSCRIPTION_PLANS } from '../utils/seedData';
+import { ADMIN_EMAIL, PAYMENT_ACCOUNT_DETAILS, SUBSCRIPTION_PLANS } from '../utils/seedData';
 
 export const SubscriptionView: React.FC = () => {
   const {
     profile,
     subscription,
     paymentRequests,
+    isOwnerAccount,
     isAdminAccount,
     isProUnlocked,
     previewFreeMode,
@@ -28,6 +31,9 @@ export const SubscriptionView: React.FC = () => {
     daysUntilExpiry,
     isExpiringSoon,
     uiLanguage,
+    firebaseUser,
+    cloudSignIn,
+    cloudSignOut,
     submitSubscriptionPayment,
     adminApprovePaymentRequest,
     adminRejectPaymentRequest,
@@ -77,8 +83,11 @@ export const SubscriptionView: React.FC = () => {
     }
   };
 
-  const statusLabel =
-    subscription.status === 'active'
+  const statusLabel = isOwnerAccount
+    ? isProUnlocked
+      ? 'OWNER MASTER PRO UNLOCKED'
+      : 'FREE PREVIEW MODE'
+    : subscription.status === 'active'
       ? isProUnlocked
         ? 'ACTIVE PRO VERSION'
         : 'FREE PREVIEW MODE'
@@ -90,12 +99,11 @@ export const SubscriptionView: React.FC = () => {
             ? 'PAYMENT VERIFICATION REJECTED'
             : 'FREE / BASIC VERSION';
 
-  const statusTextColor =
-    subscription.status === 'active' && isProUnlocked
-      ? 'text-emerald-700 dark:text-emerald-400'
-      : subscription.status === 'pending_verification'
-        ? 'text-amber-700 dark:text-amber-400'
-        : 'text-rose-700 dark:text-rose-400';
+  const statusTextColor = isProUnlocked
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : subscription.status === 'pending_verification'
+      ? 'text-amber-700 dark:text-amber-400'
+      : 'text-rose-700 dark:text-rose-400';
 
   const freeFeatures = [
     { label: 'Change Company Name', allowed: true, note: 'Unlocked in Profile Settings' },
@@ -138,19 +146,19 @@ export const SubscriptionView: React.FC = () => {
               Company: <strong className="text-slate-900 dark:text-white">{profile.companyName}</strong>
               {' · '}
               Current Status: <strong className={`font-mono ${statusTextColor}`}>{statusLabel}</strong>
-              {subscription.plan !== 'free' && (
+              {!isOwnerAccount && subscription.plan !== 'free' && (
                 <>
                   {' · '}
                   Plan: <strong className="font-mono uppercase">{subscription.plan}</strong>
                 </>
               )}
-              {subscription.startDate && (
+              {!isOwnerAccount && subscription.startDate && (
                 <>
                   {' · '}
                   Start: <strong className="font-mono tabular-nums">{subscription.startDate}</strong>
                 </>
               )}
-              {subscription.expiryDate && (
+              {!isOwnerAccount && subscription.expiryDate && (
                 <>
                   {' · '}
                   Expiry: <strong className="font-mono tabular-nums">{subscription.expiryDate}</strong>
@@ -162,25 +170,78 @@ export const SubscriptionView: React.FC = () => {
             </p>
           </div>
 
-          {isAdminAccount && subscription.status === 'active' && (
-            <button
-              type="button"
-              onClick={() => setPreviewFreeMode(!previewFreeMode)}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 self-start"
-            >
-              {previewFreeMode ? (
-                <>
-                  <Unlock className="w-4 h-4 text-emerald-600" />
-                  Restore Pro Unlocked View
-                </>
+          <div className="flex flex-wrap items-center gap-2 self-start">
+            {isOwnerAccount && (
+              <button
+                type="button"
+                onClick={() => setPreviewFreeMode(!previewFreeMode)}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                {previewFreeMode ? (
+                  <>
+                    <Unlock className="w-4 h-4 text-emerald-600" />
+                    Restore Owner Pro View
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4 text-amber-600" />
+                    Preview Free Basic Locks
+                  </>
+                )}
+              </button>
+            )}
+            {firebaseUser ? (
+              <button
+                type="button"
+                onClick={cloudSignOut}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-700 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                Sign Out ({firebaseUser.email})
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={cloudSignIn}
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 px-4 py-2 text-xs font-semibold text-white"
+              >
+                <Cloud className="w-4 h-4" />
+                Owner / User Google Sign-In
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Owner-Only Auto-Unlock & Access Notice */}
+        <div
+          className={`mt-4 rounded-lg border p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs ${
+            isOwnerAccount
+              ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-950 dark:text-emerald-200'
+              : 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-300'
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            {isOwnerAccount ? (
+              <ShieldCheck className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <Lock className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+            )}
+            <div>
+              {isOwnerAccount ? (
+                <span>
+                  <strong>Owner Master Access Active ({ADMIN_EMAIL}):</strong> Full Pro modules &amp; Admin payment verification are unlocked exclusively for your account. Other visitors &amp; external installs stay locked on Free / Basic.
+                </span>
+              ) : firebaseUser ? (
+                <span>
+                  <strong>Signed in as {firebaseUser.email}:</strong> Automatic Pro unlock is restricted to the owner (<span className="font-mono">{ADMIN_EMAIL}</span>). Other accounts remain on <strong>Free / Basic</strong> until payment is verified by Admin.
+                </span>
               ) : (
-                <>
-                  <Lock className="w-4 h-4 text-amber-600" />
-                  Preview Free Basic Locks
-                </>
+                <span>
+                  <strong>Owner-Only Auto-Unlock:</strong> Are you the owner? Sign in with Google (<span className="font-mono">{ADMIN_EMAIL}</span>) to unlock everything automatically. All other users remain on <strong>Free / Basic</strong> unless paid and verified.
+                </span>
               )}
-            </button>
-          )}
+            </div>
+          </div>
         </div>
 
         {(isExpiringSoon || subscription.status === 'expired') && (
@@ -483,13 +544,29 @@ export const SubscriptionView: React.FC = () => {
             />
           </div>
 
+          {!firebaseUser && (
+            <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-amber-950 dark:text-amber-200 font-medium">
+                Sign in with Google first to submit a Transaction ID to Admin verification.
+              </span>
+              <button
+                type="button"
+                onClick={cloudSignIn}
+                className="inline-flex items-center gap-1.5 rounded-md bg-amber-600 hover:bg-amber-700 px-3 py-1.5 font-semibold text-white"
+              >
+                <Cloud className="w-3.5 h-3.5" />
+                Sign In with Google
+              </button>
+            </div>
+          )}
+
           <div className="pt-1 flex items-center justify-between gap-3">
             <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400">
               Payable: {SUBSCRIPTION_PLANS[selectedPlan].billingLabel}
             </span>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !firebaseUser}
               className="inline-flex items-center gap-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 px-5 py-2.5 text-xs font-semibold text-white disabled:opacity-60 min-h-[40px]"
             >
               <ShieldCheck className="w-4 h-4" />
@@ -512,7 +589,7 @@ export const SubscriptionView: React.FC = () => {
             </p>
           </div>
           <span className="font-mono text-[11px] text-slate-500">
-            Role: {isAdminAccount ? 'Admin Verification Enabled' : 'View Only (Requires Admin Operator)'}
+            Role: {isAdminAccount ? `Owner Admin Enabled (${ADMIN_EMAIL})` : `Locked — Requires Owner Google Sign-In (${ADMIN_EMAIL})`}
           </span>
         </div>
 

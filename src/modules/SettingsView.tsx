@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useBusiness } from '../context/BusinessContext';
 import { useAppUpdater } from '../hooks/useAppUpdater';
-import { DEFAULT_LOGO_PATH } from '../utils/seedData';
+import { ADMIN_EMAIL, DEFAULT_LOGO_PATH } from '../utils/seedData';
 import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
 import { getRateForCurrency } from '../utils/currency';
 
@@ -25,6 +25,7 @@ export const SettingsView: React.FC = () => {
     profile,
     updateProfile,
     hasPermission,
+    isOwnerAccount,
     isProUnlocked,
     subscription,
     setActiveModule,
@@ -193,9 +194,11 @@ export const SettingsView: React.FC = () => {
             <div className="flex items-center gap-2 text-xs">
               <Crown className="w-4 h-4 text-amber-600 shrink-0" />
               <span className="font-semibold text-slate-900 dark:text-white">
-                {isProUnlocked
-                  ? `Full Pro Plan Active (${subscription.plan.toUpperCase()} · Expires ${subscription.expiryDate || '—'})`
-                  : 'Free / Basic Plan — Company Name editing is always unlocked'}
+                {isOwnerAccount && isProUnlocked
+                  ? `Owner Master Pro Unlocked (${ADMIN_EMAIL})`
+                  : isProUnlocked
+                    ? `Full Pro Plan Active (${subscription.plan.toUpperCase()} · Expires ${subscription.expiryDate || '—'})`
+                    : 'Free / Basic Plan — Company Name editing is always unlocked'}
               </span>
             </div>
             <button

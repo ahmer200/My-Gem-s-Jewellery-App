@@ -25,6 +25,7 @@ import { DeleteActionButton } from '../components/DeleteActionButton';
 import { DispatchConfirmModal } from '../components/DispatchConfirmModal';
 import { ItemVelocityChart } from '../components/ItemVelocityChart';
 import { WorldCurrencySelect } from '../components/WorldCurrencySelect';
+import { ADMIN_EMAIL } from '../utils/seedData';
 import { SalesOrder } from '../types/business';
 
 export const DashboardView: React.FC = () => {
@@ -40,6 +41,7 @@ export const DashboardView: React.FC = () => {
     deleteSale,
     setActiveModule,
     hasPermission,
+    isOwnerAccount,
     isProUnlocked,
     subscription,
   } = useBusiness();
@@ -131,9 +133,11 @@ export const DashboardView: React.FC = () => {
                 className="mt-1 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:underline"
               >
                 <Crown className="w-3.5 h-3.5" />
-                {isProUnlocked
-                  ? `Full Pro Plan Active${subscription.expiryDate ? ` · Expires ${subscription.expiryDate}` : ''}`
-                  : 'Free / Basic Plan · Upgrade (4500 PKR/mo) via EasyPaisa / Meezan Bank'}
+                {isOwnerAccount && isProUnlocked
+                  ? `Owner Master Pro Unlocked (${ADMIN_EMAIL})`
+                  : isProUnlocked
+                    ? `Full Pro Plan Active${subscription.expiryDate ? ` · Expires ${subscription.expiryDate}` : ''}`
+                    : 'Free / Basic Plan · Upgrade (4500 PKR/mo) via EasyPaisa / Meezan Bank'}
               </button>
             </div>
           </div>

@@ -63,6 +63,10 @@ class AqsaViewModel(application: Application) : AndroidViewModel(application) {
     val paymentVerifications: StateFlow<List<PaymentVerificationEntity>> = repository.paymentVerifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val isOwnerAccount: StateFlow<Boolean> = loggedInUser
+        .flatMapLatest { user -> flowOf(repository.isOwnerAccount(user)) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     val isProUnlocked: StateFlow<Boolean> = combine(loggedInUser, activeSubscription) { user, sub ->
         repository.isProUnlocked(user, sub)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
@@ -165,13 +169,22 @@ class AqsaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun adminVerifyPayment(request: PaymentVerificationEntity, note: String = "") = viewModelScope.launch {
+        val currentUser = loggedInUser.value
+        if (!repository.isOwnerAccount(currentUser)) return@launch
         repository.adminVerifyAndActivateSubscription(
+            actingUser = currentUser,
             request = request,
-            adminNote = note.ifBlank { "Verified by Admin (Ahmer Iqbal)" }
+            adminNote = note.ifBlank { "Verified by Owner (ahmer.iqbal.khan@gmail.com)" }
         )
     }
 
     fun adminRejectPayment(requestId: Long, note: String) = viewModelScope.launch {
-        repository.adminRejectPayment(requestId, note)
+        val currentUser = loggedInUser.value
+        if (!repository.isOwnerAccount(currentUser)) return@launch
+        repository.adminRejectPayment(
+            actingUser = currentUser,
+            requestId = requestId,
+            adminNote = note
+        )
     }
 }

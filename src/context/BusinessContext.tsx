@@ -247,6 +247,7 @@ interface BusinessContextValue extends StoredBusinessState {
   renameItemUnit: (oldName: string, newName: string) => void;
   deleteItemUnit: (unitName: string) => void;
   // Subscription & Payment Verification
+  isOwnerAccount: boolean;
   isAdminAccount: boolean;
   isProUnlocked: boolean;
   previewFreeMode: boolean;
@@ -335,6 +336,7 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [pendingOfflineSync, setPendingOfflineSync] = useState(false);
   const [localMutationSeq, setLocalMutationSeq] = useState(0);
   const [previewFreeMode, setPreviewFreeMode] = useState(false);
+  const [cloudPaymentRequests, setCloudPaymentRequests] = useState<PaymentVerificationRequest[]>([]);
   const expiryToastShownRef = useRef(false);
 
   const stateRef = useRef(state);
@@ -431,6 +433,7 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (!authReady || !firebaseUser) {
       setLiveSyncActive(false);
       cloudSettledRef.current = false;
+      setCloudPaymentRequests([]);
       return;
     }
 
@@ -474,23 +477,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             // Keep existing local units
           }
         }
-        let parsedCloudSub: SubscriptionState | null = null;
-        if (profile.subscriptionJson) {
-          try {
-            const obj = JSON.parse(profile.subscriptionJson) as Partial<SubscriptionState>;
-            if (obj && typeof obj === 'object' && obj.status) {
-              parsedCloudSub = normalizeSubscriptionState(obj);
-            }
-          } catch {
-            // Keep existing local subscription
-          }
-        }
         setState((prev) => ({
           ...prev,
           profile: { ...prev.profile, ...profile },
           customCategories: parsedCloudCats ?? prev.customCategories,
           customUnits: parsedCloudUnits ?? prev.customUnits,
-          subscription: parsedCloudSub ?? prev.subscription,
         }));
         setLastSyncedAt(new Date().toLocaleTimeString());
       },
@@ -573,9 +564,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       firebaseUser.uid,
       isCloudAdmin,
       (cloudReqs) => {
+        setCloudPaymentRequests(cloudReqs);
         setState((prev) => {
           const mergedMap = new Map<string, PaymentVerificationRequest>();
-          for (const r of prev.paymentRequests) mergedMap.set(r.id, r);
+          if (isCloudAdmin) {
+            for (const r of prev.paymentRequests) mergedMap.set(r.id, r);
+          }
           for (const r of cloudReqs) mergedMap.set(r.id, r);
           const mergedList = Array.from(mergedMap.values()).sort((a, b) =>
             (b.submittedDate || b.createdAt).localeCompare(a.submittedDate || a.createdAt)
@@ -583,6 +577,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
           const ownVerified = cloudReqs.find(
             (r) => r.ownerId === firebaseUser.uid && r.status === 'verified' && r.expiryDate
+          );
+          const ownLatestPendingOrRejected = cloudReqs.find(
+            (r) =>
+              r.ownerId === firebaseUser.uid &&
+              (r.status === 'pending' || r.status === 'rejected')
           );
           let nextSub = prev.subscription;
           let nextProfile = prev.profile;
@@ -608,6 +607,21 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
                 ...prev.profile,
                 subscriptionJson: JSON.stringify(activated).slice(0, 3800),
               };
+            }
+          } else if (!isCloudAdmin) {
+            if (ownLatestPendingOrRejected) {
+              nextSub = {
+                plan: ownLatestPendingOrRejected.planType,
+                status:
+                  ownLatestPendingOrRejected.status === 'rejected'
+                    ? 'rejected'
+                    : 'pending_verification',
+                lastPaymentMethod: ownLatestPendingOrRejected.paymentMethod,
+                lastTransactionId: ownLatestPendingOrRejected.transactionId,
+                updatedAt: ownLatestPendingOrRejected.updatedAt,
+              };
+            } else if (prev.subscription.status === 'active') {
+              nextSub = INITIAL_SUBSCRIPTION;
             }
           }
 
@@ -943,25 +957,81 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [commitItemUnits]
   );
 
-  const isAdminAccount =
-    activeOperator.role === 'admin' ||
-    firebaseUser?.email?.toLowerCase() === ADMIN_EMAIL;
+  // Strictly unlock automatic owner privileges & admin verification ONLY for the verified owner email
+  const isOwnerAccount = Boolean(
+    firebaseUser?.emailVerified &&
+      firebaseUser.email?.toLowerCase() === ADMIN_EMAIL
+  );
+  const isAdminAccount = isOwnerAccount;
+
+  const verifiedCloudRequest = React.useMemo(() => {
+    if (!firebaseUser || isOwnerAccount) return null;
+    return (
+      cloudPaymentRequests.find(
+        (r) =>
+          r.ownerId === firebaseUser.uid &&
+          r.status === 'verified' &&
+          Boolean(r.expiryDate)
+      ) || null
+    );
+  }, [firebaseUser, isOwnerAccount, cloudPaymentRequests]);
+
+  const effectiveSubscription: SubscriptionState = React.useMemo(() => {
+    if (isOwnerAccount) {
+      return {
+        plan: 'yearly',
+        status: 'active',
+        startDate: state.subscription.startDate || new Date().toISOString().slice(0, 10),
+        expiryDate: state.subscription.expiryDate,
+        lastPaymentMethod: state.subscription.lastPaymentMethod,
+        lastTransactionId: state.subscription.lastTransactionId || 'OWNER-AHMER-IQBAL',
+        updatedAt: state.subscription.updatedAt,
+      };
+    }
+    if (!firebaseUser) {
+      return INITIAL_SUBSCRIPTION;
+    }
+    if (verifiedCloudRequest && verifiedCloudRequest.expiryDate) {
+      const expMs = new Date(`${verifiedCloudRequest.expiryDate}T23:59:59`).getTime();
+      const isStillValid = !Number.isNaN(expMs) && expMs >= Date.now();
+      return {
+        plan: verifiedCloudRequest.planType,
+        status: isStillValid ? 'active' : 'expired',
+        startDate: verifiedCloudRequest.startDate,
+        expiryDate: verifiedCloudRequest.expiryDate,
+        lastPaymentMethod: verifiedCloudRequest.paymentMethod,
+        lastTransactionId: verifiedCloudRequest.transactionId,
+        updatedAt: verifiedCloudRequest.updatedAt,
+      };
+    }
+    if (state.subscription.status === 'active') {
+      return INITIAL_SUBSCRIPTION;
+    }
+    return state.subscription;
+  }, [isOwnerAccount, firebaseUser, verifiedCloudRequest, state.subscription]);
 
   const daysUntilExpiry: number | null = React.useMemo(() => {
-    if (!state.subscription.expiryDate) return null;
-    const expMs = new Date(`${state.subscription.expiryDate}T23:59:59`).getTime();
+    if (!effectiveSubscription.expiryDate) return null;
+    const expMs = new Date(`${effectiveSubscription.expiryDate}T23:59:59`).getTime();
     if (Number.isNaN(expMs)) return null;
     return Math.ceil((expMs - Date.now()) / (1000 * 60 * 60 * 24));
-  }, [state.subscription.expiryDate]);
+  }, [effectiveSubscription.expiryDate]);
 
   const isExpiringSoon =
-    state.subscription.status === 'expired' ||
-    (state.subscription.status === 'active' && daysUntilExpiry !== null && daysUntilExpiry <= 7);
+    !isOwnerAccount &&
+    (effectiveSubscription.status === 'expired' ||
+      (effectiveSubscription.status === 'active' &&
+        daysUntilExpiry !== null &&
+        daysUntilExpiry <= 7));
+
+  const hasVerifiedPaidSubscription = Boolean(
+    firebaseUser &&
+      effectiveSubscription.status === 'active' &&
+      (daysUntilExpiry === null || daysUntilExpiry >= 0)
+  );
 
   const isProUnlocked =
-    !previewFreeMode &&
-    state.subscription.status === 'active' &&
-    (daysUntilExpiry === null || daysUntilExpiry >= 0);
+    !previewFreeMode && (isOwnerAccount || hasVerifiedPaidSubscription);
 
   const isFeatureLocked = useCallback(
     (_feature: SubscriptionFeatureKey) => !isProUnlocked,
@@ -969,25 +1039,31 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   );
 
   useEffect(() => {
-    if (expiryToastShownRef.current) return;
-    if (state.subscription.status === 'expired') {
+    if (isOwnerAccount || expiryToastShownRef.current) return;
+    if (effectiveSubscription.status === 'expired') {
       expiryToastShownRef.current = true;
       notify(
         'Your AQSA BMS subscription has expired. Renew Monthly (4500 PKR) or Yearly (35000 PKR) in Subscription & Pay.',
         'error'
       );
     } else if (
-      state.subscription.status === 'active' &&
+      effectiveSubscription.status === 'active' &&
       daysUntilExpiry !== null &&
       daysUntilExpiry <= 7
     ) {
       expiryToastShownRef.current = true;
       notify(
-        `Subscription expiry reminder: ${daysUntilExpiry} day(s) remaining (Expires ${state.subscription.expiryDate}).`,
+        `Subscription expiry reminder: ${daysUntilExpiry} day(s) remaining (Expires ${effectiveSubscription.expiryDate}).`,
         'info'
       );
     }
-  }, [state.subscription.status, state.subscription.expiryDate, daysUntilExpiry, notify]);
+  }, [
+    isOwnerAccount,
+    effectiveSubscription.status,
+    effectiveSubscription.expiryDate,
+    daysUntilExpiry,
+    notify,
+  ]);
 
   const submitSubscriptionPayment = useCallback(
     async (payload: {
@@ -996,6 +1072,13 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       transactionId: string;
       senderAccount: string;
     }) => {
+      if (!firebaseUser) {
+        notify(
+          `Sign in with Google first before submitting your Transaction ID so Admin (${ADMIN_EMAIL}) can verify and unlock your account.`,
+          'error'
+        );
+        return;
+      }
       const cleanTid = payload.transactionId.trim();
       if (!cleanTid) {
         notify('Please enter your EasyPaisa or Bank Transaction ID (TID).', 'error');
@@ -1004,12 +1087,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const planMeta = SUBSCRIPTION_PLANS[payload.planType];
       const today = new Date().toISOString().slice(0, 10);
       const now = new Date().toISOString();
-      const ownerUid = firebaseUser?.uid || stateRef.current.activeStaffId;
+      const ownerUid = firebaseUser.uid;
       const newReq: PaymentVerificationRequest = {
         id: `payreq-${Date.now()}`,
         ownerId: ownerUid,
-        userEmail: firebaseUser?.email || activeOperator.email || '',
-        userName: firebaseUser?.displayName || activeOperator.name,
+        userEmail: firebaseUser.email || '',
+        userName: firebaseUser.displayName || activeOperator.name,
         companyName: stateRef.current.profile.companyName,
         planType: payload.planType,
         amountPkr: planMeta.pricePkr,
@@ -1042,20 +1125,22 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }));
       markLocalMutation();
 
-      if (firebaseUser) {
-        try {
-          await submitSubscriptionRequestToCloud(newReq);
-        } catch {
-          // Local copy already saved
-        }
+      try {
+        await submitSubscriptionRequestToCloud(newReq);
+        notify(`Transaction ID ${cleanTid} submitted for Admin verification.`, 'info');
+      } catch {
+        notify('Could not submit request to cloud verification queue. Please check your connection and try again.', 'error');
       }
-      notify(`Transaction ID ${cleanTid} submitted for Admin verification.`, 'info');
     },
     [firebaseUser, activeOperator, markLocalMutation, notify]
   );
 
   const adminApprovePaymentRequest = useCallback(
     async (requestId: string, adminNote?: string) => {
+      if (!isOwnerAccount || !firebaseUser) {
+        notify(`Only the owner account (${ADMIN_EMAIL}) can verify and activate subscriptions.`, 'error');
+        return;
+      }
       const target = stateRef.current.paymentRequests.find((r) => r.id === requestId);
       if (!target) return;
       const startDate = new Date().toISOString().slice(0, 10);
@@ -1077,10 +1162,7 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               }
             : r
         );
-        const matchesLocalOwner =
-          !firebaseUser ||
-          target.ownerId === firebaseUser.uid ||
-          target.ownerId === prev.activeStaffId;
+        const matchesLocalOwner = target.ownerId === firebaseUser.uid;
 
         const nextSub: SubscriptionState = matchesLocalOwner
           ? {
@@ -1106,25 +1188,28 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setPreviewFreeMode(false);
       markLocalMutation();
 
-      if (firebaseUser && firebaseUser.email?.toLowerCase() === ADMIN_EMAIL) {
-        try {
-          await adminUpdateSubscriptionRequestStatus(requestId, {
-            status: 'verified',
-            startDate,
-            expiryDate,
-            adminNote: note,
-          });
-        } catch {
-          // Local verification saved
-        }
+      try {
+        await adminUpdateSubscriptionRequestStatus(requestId, {
+          status: 'verified',
+          startDate,
+          expiryDate,
+          adminNote: note,
+        });
+      } catch {
+        notify('Failed to update verification status in cloud.', 'error');
+        return;
       }
-      notify(`Payment ${target.transactionId} verified! Full Pro unlocked until ${expiryDate}.`);
+      notify(`Payment ${target.transactionId} verified! Pro unlocked for ${target.userEmail || target.ownerId} until ${expiryDate}.`);
     },
-    [firebaseUser, markLocalMutation, notify]
+    [isOwnerAccount, firebaseUser, markLocalMutation, notify]
   );
 
   const adminRejectPaymentRequest = useCallback(
     async (requestId: string, adminNote?: string) => {
+      if (!isOwnerAccount || !firebaseUser) {
+        notify(`Only the owner account (${ADMIN_EMAIL}) can reject payment requests.`, 'error');
+        return;
+      }
       const target = stateRef.current.paymentRequests.find((r) => r.id === requestId);
       if (!target) return;
       const now = new Date().toISOString();
@@ -1136,10 +1221,7 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ? { ...r, status: 'rejected' as const, adminNote: note, updatedAt: now }
             : r
         );
-        const matchesLocalOwner =
-          !firebaseUser ||
-          target.ownerId === firebaseUser.uid ||
-          target.ownerId === prev.activeStaffId;
+        const matchesLocalOwner = target.ownerId === firebaseUser.uid;
         const nextSub: SubscriptionState =
           matchesLocalOwner && prev.subscription.lastTransactionId === target.transactionId
             ? { ...prev.subscription, status: 'rejected', updatedAt: now }
@@ -1155,19 +1237,18 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       });
       markLocalMutation();
 
-      if (firebaseUser && firebaseUser.email?.toLowerCase() === ADMIN_EMAIL) {
-        try {
-          await adminUpdateSubscriptionRequestStatus(requestId, {
-            status: 'rejected',
-            adminNote: note,
-          });
-        } catch {
-          // Local rejection saved
-        }
+      try {
+        await adminUpdateSubscriptionRequestStatus(requestId, {
+          status: 'rejected',
+          adminNote: note,
+        });
+      } catch {
+        notify('Failed to update rejection status in cloud.', 'error');
+        return;
       }
       notify(`Payment ${target.transactionId} marked rejected.`, 'info');
     },
-    [firebaseUser, markLocalMutation, notify]
+    [isOwnerAccount, firebaseUser, markLocalMutation, notify]
   );
 
   const addInventoryItem = useCallback(
@@ -1951,7 +2032,12 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const cloudSignOut = useCallback(async () => {
     await signOutFirebase();
-    notify('Signed out from Firebase Cloud Sync.', 'info');
+    setPreviewFreeMode(false);
+    setState((prev) => ({
+      ...prev,
+      subscription: INITIAL_SUBSCRIPTION,
+    }));
+    notify('Signed out. App switched back to Free / Basic mode.', 'info');
   }, [notify]);
 
   const syncNowToCloud = useCallback(async () => {
@@ -2019,23 +2105,11 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             // Keep existing local units
           }
         }
-        let parsedCloudSub: SubscriptionState | null = null;
-        if (data.profile?.subscriptionJson) {
-          try {
-            const obj = JSON.parse(data.profile.subscriptionJson) as Partial<SubscriptionState>;
-            if (obj && typeof obj === 'object' && obj.status) {
-              parsedCloudSub = normalizeSubscriptionState(obj);
-            }
-          } catch {
-            // Keep existing local subscription
-          }
-        }
         setState((prev) => ({
           ...prev,
           profile: data.profile ? { ...prev.profile, ...data.profile } : prev.profile,
           customCategories: parsedCloudCats ?? prev.customCategories,
           customUnits: parsedCloudUnits ?? prev.customUnits,
-          subscription: parsedCloudSub ?? prev.subscription,
           inventory: data.inventory && data.inventory.length > 0 ? data.inventory : prev.inventory,
           purchases: data.purchases && data.purchases.length > 0 ? data.purchases : prev.purchases,
           sales: data.sales && data.sales.length > 0 ? data.sales : prev.sales,
@@ -2085,6 +2159,8 @@ export const BusinessProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         addItemUnit,
         renameItemUnit,
         deleteItemUnit,
+        subscription: effectiveSubscription,
+        isOwnerAccount,
         isAdminAccount,
         isProUnlocked,
         previewFreeMode,

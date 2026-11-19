@@ -3,6 +3,7 @@ package com.nagem.aqsa.data.local
 import kotlinx.coroutines.flow.Flow
 
 object SubscriptionPlans {
+    const val OWNER_EMAIL = "ahmer.iqbal.khan@gmail.com"
     const val MONTHLY_PRICE_PKR = 4500
     const val YEARLY_PRICE_PKR = 35000
     const val MONTHLY_DURATION_DAYS = 30L
@@ -91,7 +92,7 @@ class AqsaRepository(private val dao: AqsaDao) {
                 UserEntity(
                     fullName = fullName.trim().ifBlank { "Merchant User" },
                     email = cleanEmail,
-                    role = if (cleanEmail == "ahmer.iqbal.khan@gmail.com") "admin" else "user",
+                    role = if (cleanEmail == SubscriptionPlans.OWNER_EMAIL) "admin" else "user",
                     isLoggedIn = true
                 )
             )
@@ -160,14 +161,21 @@ class AqsaRepository(private val dao: AqsaDao) {
         return reqId
     }
 
+    fun isOwnerAccount(user: UserEntity?): Boolean =
+        user?.email?.trim()?.lowercase() == SubscriptionPlans.OWNER_EMAIL
+
     /**
-     * Admin Payment Verification: marks verification approved and immediately unlocks
-     * the full Pro version with Monthly (+30 days) or Yearly (+365 days) validity.
+     * Owner Payment Verification: marks verification approved and unlocks
+     * the full Pro version ONLY when triggered by the verified owner account.
      */
     suspend fun adminVerifyAndActivateSubscription(
+        actingUser: UserEntity?,
         request: PaymentVerificationEntity,
         adminNote: String = "Payment verified by Ahmer Iqbal"
     ) {
+        if (!isOwnerAccount(actingUser)) {
+            throw SecurityException("Only owner account (${SubscriptionPlans.OWNER_EMAIL}) can verify payments.")
+        }
         val now = System.currentTimeMillis()
         dao.updatePaymentVerificationStatus(
             requestId = request.id,
@@ -203,7 +211,14 @@ class AqsaRepository(private val dao: AqsaDao) {
         )
     }
 
-    suspend fun adminRejectPayment(requestId: Long, adminNote: String) {
+    suspend fun adminRejectPayment(
+        actingUser: UserEntity?,
+        requestId: Long,
+        adminNote: String
+    ) {
+        if (!isOwnerAccount(actingUser)) {
+            throw SecurityException("Only owner account (${SubscriptionPlans.OWNER_EMAIL}) can reject payments.")
+        }
         dao.updatePaymentVerificationStatus(
             requestId = requestId,
             status = "rejected",
@@ -213,8 +228,8 @@ class AqsaRepository(private val dao: AqsaDao) {
     }
 
     fun isProUnlocked(user: UserEntity?, sub: SubscriptionEntity?): Boolean {
-        if (user?.role == "admin") return true
-        if (sub == null) return false
+        if (isOwnerAccount(user)) return true
+        if (user == null || sub == null) return false
         return sub.status == "active" && sub.expiryDateMs > System.currentTimeMillis()
     }
 

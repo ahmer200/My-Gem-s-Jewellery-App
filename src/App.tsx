@@ -78,6 +78,7 @@ const AppShell: React.FC = () => {
     syncNowToCloud,
     cloudSignIn,
     subscription,
+    isOwnerAccount,
     isProUnlocked,
     daysUntilExpiry,
     isExpiringSoon,
@@ -279,7 +280,7 @@ const AppShell: React.FC = () => {
 
         {/* Active Module Viewport */}
         <main className="flex-1 p-4 md:p-6 pb-24 lg:pb-8 max-w-[1600px] w-full mx-auto space-y-5">
-          {subscription.status === 'expired' ? (
+          {!isOwnerAccount && subscription.status === 'expired' ? (
             <div className="no-print rounded-xl border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2.5 text-rose-900 dark:text-rose-200">
                 <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
@@ -295,7 +296,7 @@ const AppShell: React.FC = () => {
                 Renew Now
               </button>
             </div>
-          ) : isExpiringSoon ? (
+          ) : !isOwnerAccount && isExpiringSoon ? (
             <div className="no-print rounded-xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/35 px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2.5 text-amber-950 dark:text-amber-200">
                 <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -323,14 +324,26 @@ const AppShell: React.FC = () => {
                   <span className="font-mono">03320001602</span> / Meezan Bank
                 </span>
               </div>
-              <button
-                type="button"
-                onClick={() => handleSelectModule('subscription')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold whitespace-nowrap"
-              >
-                <Crown className="w-3.5 h-3.5" />
-                Upgrade / Pay Now
-              </button>
+              <div className="flex items-center gap-2">
+                {!firebaseUser && (
+                  <button
+                    type="button"
+                    onClick={cloudSignIn}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-700 text-emerald-700 dark:border-emerald-500 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 font-semibold whitespace-nowrap"
+                  >
+                    <Cloud className="w-3.5 h-3.5" />
+                    Owner Sign In
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleSelectModule('subscription')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-semibold whitespace-nowrap"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  Upgrade / Pay Now
+                </button>
+              </div>
             </div>
           ) : null}
 
